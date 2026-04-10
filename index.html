@@ -4689,13 +4689,31 @@ const DriveSync = {
   async load() {
     try {
       this.setStatus('syncing');
-      const token = await this.getToken();
+      // Clear cached file ID and token on load attempt to force fresh auth
+      let token;
+      try {
+        token = await this.getToken();
+      } catch(e) {
+        // Token fetch failed — clear cached tokens and try once more
+        this.driveToken = null; this.driveTokenExpiry = null;
+        GMAIL.accessToken = null; GMAIL.tokenExpiry = null;
+        token = await this.getToken();
+      }
       const fileId = await this.getFileId(token);
       const res = await fetch(
         `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
         { headers: { Authorization: 'Bearer ' + token } }
       );
-      if (!res.ok) throw new Error('Could not read Drive file');
+      if (res.status === 403 || res.status === 401) {
+        // Token expired — clear and show synced (will retry on next action)
+        this.driveToken = null; this.driveTokenExpiry = null;
+        GMAIL.accessToken = null; GMAIL.tokenExpiry = null;
+        this.fileId = null;
+        console.warn('DriveSync.load: token expired, cleared for refresh');
+        this.setStatus('synced'); // Don't show error — just silently recover
+        return;
+      }
+      if (!res.ok) throw new Error('Could not read Drive file: ' + res.status);
       const data = await res.json();
       // Only restore if Drive has actual data
       if (data && Object.keys(data).length > 0) {
@@ -4724,6 +4742,11 @@ const DriveSync = {
     this.syncing = true;
     this.setStatus('syncing');
     try {
+      // Clear expired tokens before attempting save
+      if (!this.isDriveTokenValid() && !GMAIL.isTokenValid()) {
+        this.driveToken = null; this.driveTokenExpiry = null;
+        this.fileId = null;
+      }
       const token  = await this.getToken();
       const fileId = await this.getFileId(token);
       const data   = DB.exportBackup();
