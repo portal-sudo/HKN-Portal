@@ -696,7 +696,7 @@ const DB = {
 
   // STUDENTS
   getStudents()       { return Storage.get(KEYS.students) || []; },
-  saveStudents(arr)   { Storage.set(KEYS.students, arr); if (typeof DriveSync !== 'undefined') DriveSync.scheduleSave(); },
+  saveStudents(arr)   { Storage.set(KEYS.students, arr); if (typeof DriveSync !== 'undefined' && typeof currentUser !== 'undefined' && currentUser?.role !== 'teacher') DriveSync.scheduleSave(); },
   getStudent(id)      { return this.getStudents().find(s => s.id === id); },
 
   saveStudent(student) {
@@ -705,7 +705,7 @@ const DB = {
     if (idx >= 0) all[idx] = student;
     else all.push(student);
     Storage.set(KEYS.students, all);
-    if (typeof DriveSync !== 'undefined') DriveSync.scheduleSave();
+    if (typeof DriveSync !== 'undefined' && typeof currentUser !== 'undefined' && currentUser?.role !== 'teacher') DriveSync.scheduleSave();
     return student;
   },
 
@@ -748,7 +748,7 @@ const DB = {
     };
     return (Storage.get(KEYS.sessions) || []).slice().sort((a, b) => sortKey(a) - sortKey(b));
   },
-  saveSessions(arr)   { Storage.set(KEYS.sessions, arr); if (typeof DriveSync !== 'undefined') DriveSync.scheduleSave(); },
+  saveSessions(arr)   { Storage.set(KEYS.sessions, arr); if (typeof DriveSync !== 'undefined' && typeof currentUser !== 'undefined' && currentUser?.role !== 'teacher') DriveSync.scheduleSave(); },
   getSession(name)    { return this.getSessions().find(s => s.name === name); },
 
   saveSession(session) {
@@ -1735,6 +1735,10 @@ function loadAppShell() {
   seedAttributesIfEmpty();
   seedStudentsIfEmpty();
   migrateNameCasing();
+  // Reset DriveSync state on each login to prevent stale cached IDs
+  DriveSync.fileId = null;
+  DriveSync.driveToken = null;
+  DriveSync.driveTokenExpiry = null;
   // Load data from Google Drive, then navigate
   DriveSync.load().then(() => {
     seedAttributesIfEmpty();
@@ -3082,6 +3086,10 @@ function saveStudentModal(existingId) {
   DB.saveStudent(updated);
   AppState.resetModal(); closeModal();
   renderDirectory();
+  // Teachers: trigger surgical merge-save to Drive after saving scores/notes
+  if (typeof currentUser !== 'undefined' && currentUser?.role === 'teacher') {
+    DriveSync.teacherSave();
+  }
   showToast(isNew ? 'Student added' : 'Student updated', 'success');
 }
 
@@ -3590,6 +3598,10 @@ function saveClassNote(sessName, teacher, classTime) {
   }
   DB.saveClassNote(sessName, teacher, classTime, finalNote);
   if (el) el.value = finalNote; // update textarea to show dated version
+  // Teachers: trigger surgical merge-save to Drive
+  if (typeof currentUser !== 'undefined' && currentUser?.role === 'teacher') {
+    DriveSync.teacherSave();
+  }
   showToast('Notes saved', 'success');
 }
 
@@ -4853,9 +4865,9 @@ const DriveSync = {
         }
       );
 
-      // Step 6: Update local storage with merged data so teacher sees latest
-      Storage.set('hkn_students', mergedStudents);
-      Storage.set('hkn_sessions', mergedSessions);
+      // Step 6: Update local storage with merged data (direct Storage write — no DriveSync trigger)
+      Storage.set(KEYS.students, mergedStudents);
+      Storage.set(KEYS.sessions, mergedSessions);
 
       this.lastSynced = new Date();
       this.setStatus('synced');
@@ -5808,6 +5820,11 @@ function saveAttendanceBatch() {
   });
 
   showToast(`Attendance saved for ${saved} student${saved!==1?'s':''} on ${date}`, 'success');
+
+  // Teachers: trigger surgical merge-save to Drive
+  if (typeof currentUser !== 'undefined' && currentUser?.role === 'teacher') {
+    DriveSync.teacherSave();
+  }
 
   // Flash the save button
   const btn = document.querySelector('[onclick="saveAttendanceBatch()"]');
