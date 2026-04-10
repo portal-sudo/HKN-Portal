@@ -1635,7 +1635,7 @@ async function doGoogleLogin() {
     const email = await new Promise((resolve, reject) => {
       const tc = google.accounts.oauth2.initTokenClient({
         client_id: clientId,
-        scope: 'openid email profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/gmail.send',
+        scope: 'openid email profile https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/gmail.send',
         callback: async (resp) => {
           if (resp.error) { reject(new Error(resp.error_description || resp.error)); return; }
           try {
@@ -1732,7 +1732,7 @@ function loadAppShell() {
   seedStudentsIfEmpty();
   migrateNameCasing();
   // Clear DriveSync-specific token — DriveSync.load() will reuse GMAIL.accessToken
-  // which was set during Google sign-in and already covers drive.file scope
+  // which was set during Google sign-in and already covers drive scope
   DriveSync.driveToken = null;
   DriveSync.driveTokenExpiry = null;
   // Load data from Google Drive, then navigate
@@ -4642,7 +4642,7 @@ const DriveSync = {
 
   async getToken() {
     if (this.isDriveTokenValid()) return this.driveToken;
-    // Reuse GMAIL token — it was set during Google sign-in with drive.file scope
+    // Reuse GMAIL token — it was set during Google sign-in with drive scope
     // This covers both admin and teacher logins without any extra popup
     if (GMAIL.isTokenValid()) return GMAIL.accessToken;
     // Token expired — attempt silent refresh (no popup)
@@ -4652,7 +4652,7 @@ const DriveSync = {
       try {
         const tc = google.accounts.oauth2.initTokenClient({
           client_id: clientId,
-          scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/gmail.send',
+          scope: 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/gmail.send',
           prompt: '',  // silent — no popup
           callback: (resp) => {
             if (resp.error) { reject(new Error(resp.error_description || resp.error)); return; }
@@ -4860,7 +4860,7 @@ const DriveSync = {
 // ── EMAIL PAGE ───────────────────────────────────────────────
 // ── GMAIL API STATE ──────────────────────────────────────────
 const GMAIL = {
-  SCOPES: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/drive.file',
+  SCOPES: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/drive',
   accessToken: null,
   tokenExpiry: null,
 
