@@ -1735,8 +1735,7 @@ function loadAppShell() {
   seedAttributesIfEmpty();
   seedStudentsIfEmpty();
   migrateNameCasing();
-  // Reset DriveSync state on each login to prevent stale cached IDs
-  DriveSync.fileId = null;
+  // Reset token state on each login (fileId stays hardcoded)
   DriveSync.driveToken = null;
   DriveSync.driveTokenExpiry = null;
   // Load data from Google Drive, then navigate
@@ -4614,9 +4613,9 @@ function doRestore() {
 
 // ── DRIVE SYNC ──────────────────────────────────────────────
 const DriveSync = {
-  FOLDER_ID: '1UXsiEb9ujD0aftnxTJq4xJIqcMPH2Ks-',
+  FOLDER_ID: '1UXsiEb9ujD0aftnxTJq4xJIqcMPH2Ks-',  // kept for reference only
   FILE_NAME:  'hkn_portal_data.json',
-  fileId:     null,   // cached Drive file ID once found/created
+  fileId:     '10WlWMuIduakdJi6PFZvzwCoDwyHifzUk',  // hardcoded — never changes
   syncTimer:  null,
   syncing:    false,
   lastSynced: null,
@@ -4669,33 +4668,9 @@ const DriveSync = {
     });
   },
 
-  // ── Find or create the JSON file in the folder ──
+  // ── Return hardcoded file ID — no search, no accidental duplicates ──
   async getFileId(token) {
-    if (this.fileId) return this.fileId;
-    // Search for existing file in the folder (including Shared Drives)
-    const q = encodeURIComponent(`name='${this.FILE_NAME}' and '${this.FOLDER_ID}' in parents and trashed=false`);
-    const res = await fetch(
-      `https://www.googleapis.com/drive/v3/files?q=${q}&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,name,modifiedTime)`,
-      { headers: { Authorization: 'Bearer ' + token } }
-    );
-    const data = await res.json();
-    if (data.files && data.files.length > 0) {
-      this.fileId = data.files[0].id;
-      return this.fileId;
-    }
-    // File doesn't exist yet — create it
-    const meta = JSON.stringify({ name: this.FILE_NAME, parents: [this.FOLDER_ID] });
-    const empty = JSON.stringify({});
-    const form = new FormData();
-    form.append('metadata', new Blob([meta], { type: 'application/json' }));
-    form.append('file',     new Blob([empty], { type: 'application/json' }));
-    const create = await fetch(
-      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true',
-      { method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: form }
-    );
-    const created = await create.json();
-    this.fileId = created.id;
-    return this.fileId;
+    return this.fileId; // always the same file
   },
 
   // ── Load data from Drive into localStorage ──
