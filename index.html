@@ -949,16 +949,17 @@ const DB = {
   },
 
   restoreBackup(d) {
-    if (d.students)    this.saveStudents(d.students);
-    if (d.sessions)    this.saveSessions(d.sessions);
-    if (d.teachers)    this.saveTeachers(d.teachers);
-    if (d.classLevels) this.saveClassLevels(d.classLevels);
-    if (d.bookLevels)  this.saveBookLevels(d.bookLevels);
-    if (d.bookPrices)  this.saveBookPrices(d.bookPrices);
-    if (d.levelBookMap)this.saveLevelBookMap(d.levelBookMap);
-    if (d.classTimes)  this.saveClassTimes(d.classTimes);
-    if (d.classNames)  this.saveClassNames(d.classNames);
-    if (d.settings)    this.saveSettings(d.settings);
+    // Write directly to Storage — bypasses DriveSync hooks to prevent load→save loop
+    if (d.students)    Storage.set(KEYS.students,    d.students);
+    if (d.sessions)    Storage.set(KEYS.sessions,    d.sessions);
+    if (d.teachers)    Storage.set(KEYS.teachers,    d.teachers);
+    if (d.classLevels) Storage.set(KEYS.classLevels, d.classLevels);
+    if (d.bookLevels)  Storage.set(KEYS.bookLevels,  d.bookLevels);
+    if (d.bookPrices)  Storage.set(KEYS.bookPrices,  d.bookPrices);
+    if (d.levelBookMap)Storage.set(KEYS.levelBookMap,d.levelBookMap);
+    if (d.classTimes)  Storage.set(KEYS.classTimes,  d.classTimes);
+    if (d.classNames)  Storage.set(KEYS.classNames,  d.classNames);
+    if (d.settings)    Storage.set(KEYS.settings,    d.settings);
   },
 
   importJSON(json) {
@@ -4731,9 +4732,12 @@ const DriveSync = {
   // ── Save localStorage data to Drive (debounced) ──
   scheduleSave() {
     if (this.syncTimer) clearTimeout(this.syncTimer);
-    // Teachers use surgical merge-save; admins do full save
-    const isTeacher = (typeof currentUser !== 'undefined') && currentUser?.role === 'teacher';
-    this.syncTimer = setTimeout(() => isTeacher ? this.teacherSave() : this.save(), 3000);
+    // Check role at execution time (not schedule time) to ensure currentUser is set
+    this.syncTimer = setTimeout(() => {
+      const isTeacher = (typeof currentUser !== 'undefined') && currentUser?.role === 'teacher';
+      console.log('DriveSync: scheduleSave firing, role:', currentUser?.role);
+      if (isTeacher) this.teacherSave(); else this.save();
+    }, 3000);
   },
 
   // ── Full save (admin only) — writes entire DB to Drive ──
