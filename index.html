@@ -2546,7 +2546,7 @@ function openStudentModal(studentId) {
       <div id="sess-tab-${sess.name.replace(/[^a-z0-9]/gi,'_')}" class="sess-tab-content hidden">
         ${!isAdmin && teacherCanEdit ? `
           <div style="background:var(--olive-pale); border:1px solid var(--olive-mid); border-radius:var(--radius-md); padding:10px 14px; margin-bottom:14px; font-size:13px; color:var(--olive);">
-            ✏️ You can edit <strong>scores and notes</strong> for this session. All other fields are managed by the admin.
+            ✏️ You can mark attendance, edit <strong>scores and notes</strong> for this session.
           </div>` : ''}
         <div class="form-row" style="margin-bottom:14px;">
           ${fld('teacher_'+k, 'Teacher', isAdmin
@@ -2560,14 +2560,13 @@ function openStudentModal(studentId) {
           ${fld('bookLevel_'+k, 'Book Number', isAdmin
             ? selField('bookLevel_'+k, sd.bookLevel||'', bookLevels)
             : readonlyField(sd.bookLevel))}
-          <div class="form-group"></div>
-        </div>
-        <div class="form-row" style="margin-bottom:14px;">
-          ${fld('classTime_'+k, 'Class time', isAdmin
+          ${fld('classTime_'+k, 'Class Time', isAdmin
             ? selField('classTime_'+k, sd.classTime||'', classTimes)
             : readonlyField(sd.classTime))}
+        </div>
+        <div class="form-row" style="margin-bottom:14px;">
           <div class="form-group">
-            <label class="form-label">Fees paid</label>
+            <label class="form-label">Fees Paid</label>
             ${isAdmin ? `
               <div style="display:flex; gap:10px; margin-top:4px;">
                 <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
@@ -2579,9 +2578,7 @@ function openStudentModal(studentId) {
               </div>` : readonlyField(sd.feesPaid ? 'Paid' : 'Pending')
           }
           </div>
-        </div>
-        <div class="form-row" style="margin-bottom:14px;">
-          ${fld('paymentDate_'+k, 'Payment date', isAdmin
+          ${fld('paymentDate_'+k, 'Payment Date', isAdmin
             ? inputField('paymentDate_'+k, sd.paymentDate||'', 'date')
             : readonlyField(sd.paymentDate))}
         </div>
