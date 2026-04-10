@@ -1731,11 +1731,10 @@ function loadAppShell() {
   seedAttributesIfEmpty();
   seedStudentsIfEmpty();
   migrateNameCasing();
-  // Only clear token if it isn't already valid (freshly set during Google sign-in)
-  if (!DriveSync.isDriveTokenValid()) {
-    DriveSync.driveToken = null;
-    DriveSync.driveTokenExpiry = null;
-  }
+  // Clear DriveSync-specific token — DriveSync.load() will reuse GMAIL.accessToken
+  // which was set during Google sign-in and already covers drive.file scope
+  DriveSync.driveToken = null;
+  DriveSync.driveTokenExpiry = null;
   // Load data from Google Drive, then navigate
   DriveSync.load().then(() => {
     seedAttributesIfEmpty();
@@ -4643,35 +4642,31 @@ const DriveSync = {
 
   async getToken() {
     if (this.isDriveTokenValid()) return this.driveToken;
-    // Reuse GMAIL token if it already covers drive.file scope
+    // Reuse GMAIL token — it was set during Google sign-in with drive.file scope
+    // This covers both admin and teacher logins without any extra popup
     if (GMAIL.isTokenValid()) return GMAIL.accessToken;
+    // Token expired — attempt silent refresh (no popup)
     const clientId = GMAIL.getClientId();
     await GMAIL.ensureLoaded();
-    // Try silent first; if it fails (e.g. teacher's first login on a new browser),
-    // fall back to a prompted request so we don't surface a bogus sync error.
-    const tryGetToken = (prompt) => new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       try {
         const tc = google.accounts.oauth2.initTokenClient({
           client_id: clientId,
-          scope: 'https://www.googleapis.com/auth/drive.file',
-          prompt,
+          scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/gmail.send',
+          prompt: '',  // silent — no popup
           callback: (resp) => {
             if (resp.error) { reject(new Error(resp.error_description || resp.error)); return; }
             this.driveToken = resp.access_token;
             this.driveTokenExpiry = Date.now() + ((parseInt(resp.expires_in) || 3600) - 120) * 1000;
+            GMAIL.accessToken = resp.access_token;
+            GMAIL.tokenExpiry = this.driveTokenExpiry;
             resolve(resp.access_token);
           },
           error_callback: (err) => reject(new Error((err?.message || err?.type) || 'Drive auth failed')),
         });
-        tc.requestAccessToken({ prompt });
+        tc.requestAccessToken({ prompt: '' });
       } catch(e) { reject(e); }
     });
-    try {
-      return await tryGetToken('');  // silent first
-    } catch(_silentErr) {
-      // Silent failed — reuse the sign-in popup path (consent already granted)
-      return await tryGetToken('consent');
-    }
   },
 
   // ── Return hardcoded file ID — no search, no accidental duplicates ──
