@@ -5631,7 +5631,14 @@ function renderAttendance() {
               ${DB.teacherNames().map(t => `<option value="${t}">${t}</option>`).join('')}
             </select>
           </div>
-        ` : ''}
+        ` : `
+          <div class="form-group" style="min-width:160px;">
+            <label class="form-label">Class time</label>
+            <select class="form-select" id="att-classtime" onchange="loadAttendanceClass()">
+              <option value="">All times</option>
+            </select>
+          </div>
+        `}
 
       </div>
     </div>
@@ -5680,7 +5687,7 @@ function loadAttendanceClass() {
   const sessName = document.getElementById('att-session')?.value;
   const date     = document.getElementById('att-date')?.value;
   const teacher  = document.getElementById('att-teacher')?.value || '';
-
+  const classTime = document.getElementById('att-classtime')?.value || '';
 
   // If session changed, repopulate dates
   const dateEl = document.getElementById('att-date');
@@ -5703,9 +5710,31 @@ function loadAttendanceClass() {
         const tName = currentUser.name || currentUser.email.split('@')[0];
         if (sd.teacher !== tName) return false;
       }
+      if (classTime && sd.classTime !== classTime) return false;
       return true;
     })
   ).filter(s => ['Active','In-Process'].includes(s.status));
+
+  // Populate class time dropdown for teachers (based on their students in this session)
+  const ctSel = document.getElementById('att-classtime');
+  if (ctSel) {
+    const times = [...new Set(
+      DB.getStudents()
+        .flatMap(s => (s.sessionData || []).filter(sd => {
+          if (sd.session !== sessName) return false;
+          if (isTeacher) {
+            const tName = currentUser.name || currentUser.email.split('@')[0];
+            return sd.teacher === tName && sd.classTime;
+          }
+          return sd.classTime;
+        }).map(sd => sd.classTime))
+    )].sort();
+    const prev = ctSel.value;
+    ctSel.innerHTML = '<option value="">All times</option>' +
+      times.map(t => `<option value="${t}" ${t === prev ? 'selected' : ''}>${t}</option>`).join('');
+    // Re-read after repopulate in case it changed
+    if (times.length === 1) ctSel.value = times[0];
+  }
 
   if (students.length === 0) {
     document.getElementById('att-table-area').innerHTML =
