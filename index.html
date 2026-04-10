@@ -1875,39 +1875,61 @@ function renderDashboard() {
         </table>
       </div>
       <div class="card">
-        <div class="card-title">Quick actions</div>
-        <div style="display:flex; flex-direction:column; gap:10px;">
-          ${currentUser.role === 'admin' ? `
-          <button class="btn btn-secondary w-full" onclick="navigateTo('add-student')" style="justify-content:flex-start; gap:10px;">
-            ➕ Add new student
-          </button>` : ''}
-          <button class="btn btn-secondary w-full" onclick="navigateTo('directory')" style="justify-content:flex-start; gap:10px;">
-            👥 View student directory
-          </button>
-          <button class="btn btn-secondary w-full" onclick="navigateTo('import')" style="justify-content:flex-start; gap:10px;">
-            📥 Import CSV
-          </button>
-          ${currentUser.role === 'admin' ? `
-            <button class="btn btn-secondary w-full" onclick="confirmSetAlumni()" style="justify-content:flex-start; gap:10px; border-color:var(--warning); color:var(--warning);">
-              🎓 Set all Active → Alumni
+        ${currentUser.role === 'teacher' ? `
+          <div class="card-title">Classes overview</div>
+          ${(() => {
+            const sessName = activeSess?.name;
+            const students = allStudents.filter(s => s.status === 'Active');
+            // Build class groupings: key = teacher|classLevel|classTime
+            const classMap = {};
+            students.forEach(s => {
+              const sd = (s.sessionData || []).find(d => d.session === sessName);
+              if (!sd || !sd.teacher) return;
+              const key = (sd.teacher || '') + '|' + (sd.classLevel || '') + '|' + (sd.classTime || '');
+              if (!classMap[key]) classMap[key] = { teacher: sd.teacher, classLevel: sd.classLevel || '—', classTime: sd.classTime || '—', count: 0 };
+              classMap[key].count++;
+            });
+            const rows = Object.values(classMap).sort((a,b) => a.teacher.localeCompare(b.teacher) || a.classTime.localeCompare(b.classTime));
+            if (!rows.length) return '<div style="font-size:13px;color:var(--ink-light);padding:8px 0;">No active classes for this session.</div>';
+            return '<div class="table-wrap"><table><thead><tr><th>Teacher</th><th>Class Level</th><th>Class Time</th><th style="text-align:center;">Students</th></tr></thead><tbody>' +
+              rows.map(r => '<tr><td style="font-weight:500;">' + escHtml(r.teacher) + '</td><td>' + escHtml(r.classLevel) + '</td><td>' + escHtml(r.classTime) + '</td><td style="text-align:center;"><span class="badge badge-active">' + r.count + '</span></td></tr>').join('') +
+              '</tbody></table></div>';
+          })()}
+        ` : `
+          <div class="card-title">Quick actions</div>
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            ${currentUser.role === 'admin' ? `
+            <button class="btn btn-secondary w-full" onclick="navigateTo('add-student')" style="justify-content:flex-start; gap:10px;">
+              ➕ Add new student
+            </button>` : ''}
+            <button class="btn btn-secondary w-full" onclick="navigateTo('directory')" style="justify-content:flex-start; gap:10px;">
+              👥 View student directory
             </button>
-            ${activeSess?.enrollmentOpen ? `
-              <button class="btn btn-primary w-full" onclick="openInviteReturningDialog()" style="justify-content:flex-start; gap:10px;">
-                ✉️ Invite returning students
+            <button class="btn btn-secondary w-full" onclick="navigateTo('import')" style="justify-content:flex-start; gap:10px;">
+              📥 Import CSV
+            </button>
+            ${currentUser.role === 'admin' ? \`
+              <button class="btn btn-secondary w-full" onclick="confirmSetAlumni()" style="justify-content:flex-start; gap:10px; border-color:var(--warning); color:var(--warning);">
+                🎓 Set all Active → Alumni
               </button>
-            ` : ''}
-            ${activeSess?.enrollmentOpen && activeSess?.term === 'Fall' ? `
-              <button class="btn btn-secondary w-full" onclick="openBookNeedsDialog()" style="justify-content:flex-start; gap:10px; border-color:var(--teal,#1F6B75); color:var(--teal,#1F6B75);">
-                📚 Check book needs
-              </button>
-            ` : ''}
-            ${activeSess?.enrollmentOpen && (activeSess?.term === 'Winter' || activeSess?.term === 'Spring') ? `
-              <button class="btn btn-primary w-full" onclick="openRollForwardDialog()" style="justify-content:flex-start; gap:10px;">
-                ⏩ Roll Active students to ${activeSess?.name}
-              </button>
-            ` : ''}
-          ` : ''}
-        </div>
+              \${activeSess?.enrollmentOpen ? \`
+                <button class="btn btn-primary w-full" onclick="openInviteReturningDialog()" style="justify-content:flex-start; gap:10px;">
+                  ✉️ Invite returning students
+                </button>
+              \` : ''}
+              \${activeSess?.enrollmentOpen && activeSess?.term === 'Fall' ? \`
+                <button class="btn btn-secondary w-full" onclick="openBookNeedsDialog()" style="justify-content:flex-start; gap:10px; border-color:var(--teal,#1F6B75); color:var(--teal,#1F6B75);">
+                  📚 Check book needs
+                </button>
+              \` : ''}
+              \${activeSess?.enrollmentOpen && (activeSess?.term === 'Winter' || activeSess?.term === 'Spring') ? \`
+                <button class="btn btn-primary w-full" onclick="openRollForwardDialog()" style="justify-content:flex-start; gap:10px;">
+                  ⏩ Roll Active students to \${activeSess?.name}
+                </button>
+              \` : ''}
+            \` : ''}
+          </div>
+        `}
       </div>
     </div>
 
@@ -4794,16 +4816,22 @@ const DriveSync = {
           const localSd = (localStudent.sessionData || []).find(s => s.session === driveSd.session);
           if (!localSd) return driveSd;
 
-          // Only merge if this teacher owns this session entry
-          const isOwn = (driveSd.teacher || '').toLowerCase().includes(teacherName.toLowerCase()) ||
-                        (driveSd.teacher || '').toLowerCase().includes(teacherEmail.split('@')[0].toLowerCase());
+          // Only merge if this teacher owns this session entry.
+          // Match against name, email prefix, or full email stored in teacher field.
+          const teacherFieldLc = (driveSd.teacher || '').toLowerCase();
+          const isOwn = teacherFieldLc.includes(teacherName.toLowerCase()) ||
+                        teacherFieldLc.includes(teacherEmail.split('@')[0].toLowerCase()) ||
+                        teacherFieldLc === teacherEmail.toLowerCase();
           if (!isOwn) return driveSd; // not their student — keep Drive version
+
+          // Deep-merge attendance: combine Drive dates + local dates (local wins on conflict)
+          const mergedAttendance = Object.assign({}, driveSd.attendance || {}, localSd.attendance || {});
 
           // Merge only teacher-writable fields
           return {
             ...driveSd,
-            attendance:    localSd.attendance    || driveSd.attendance,
-            notes:         localSd.notes         || driveSd.notes,
+            attendance:    mergedAttendance,
+            notes:         localSd.notes         !== undefined ? localSd.notes         : driveSd.notes,
             speakingScore: localSd.speakingScore !== undefined ? localSd.speakingScore : driveSd.speakingScore,
             readingScore:  localSd.readingScore  !== undefined ? localSd.readingScore  : driveSd.readingScore,
             writingScore:  localSd.writingScore  !== undefined ? localSd.writingScore  : driveSd.writingScore,
