@@ -1612,11 +1612,7 @@ let selectedRole = 'admin';
 function selectRole(role) {
   selectedRole = role;
   document.querySelectorAll('.role-btn').forEach(b => b.classList.remove('selected'));
-  document.querySelector(`[data-role="${role}"]`).classList.add('selected');
-  document.getElementById('pw-group').style.display = role === 'admin' ? '' : 'none';
-  const emailMap = { admin:'', teacher:'', viewer:'' };
-  document.getElementById('login-email').value = emailMap[role] || '';
-  document.getElementById('login-password').value = '';
+  document.querySelector(`[data-role="${role}"]`)?.classList.add('selected');
 }
 
 async function doGoogleLogin() {
@@ -4615,7 +4611,7 @@ function doRestore() {
 const DriveSync = {
   FOLDER_ID: '1UXsiEb9ujD0aftnxTJq4xJIqcMPH2Ks-',  // kept for reference only
   FILE_NAME:  'hkn_portal_data.json',
-  fileId:     '10WlWMuIduakdJi6PFZvzwCoDwyHifzUk',  // hardcoded — never changes
+  fileId:     '1IIRLOJGGTcI2zlnXqKJSdOIkb-iYbo5m',  // hardcoded — never changes
   syncTimer:  null,
   syncing:    false,
   lastSynced: null,
