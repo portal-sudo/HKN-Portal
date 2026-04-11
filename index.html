@@ -415,11 +415,11 @@ tbody tr { transition: background var(--transition); }
     <div class="form-group" style="margin-bottom:16px;">
       <label class="form-label">Sign in as</label>
       <div class="role-selector">
-        <div class="role-btn selected" data-role="admin" onclick="selectRole('admin')">
+        <div class="role-btn" data-role="admin" onclick="selectRole('admin')">
           <div class="role-btn-icon">🏫</div>
           <div class="role-btn-label">Admin</div>
         </div>
-        <div class="role-btn" data-role="teacher" onclick="selectRole('teacher')">
+        <div class="role-btn selected" data-role="teacher" onclick="selectRole('teacher')">
           <div class="role-btn-icon">👩‍🏫</div>
           <div class="role-btn-label">Teacher</div>
         </div>
@@ -616,7 +616,7 @@ tbody tr { transition: background var(--transition); }
       <span class="nav-session-badge" id="current-session-badge"></span>
     </div>
     <div class="nav-right">
-      <span id="drive-sync-status" style="font-size:11px; color:var(--ink-light); margin-right:4px; cursor:pointer;" onclick="manualSync()" title="Click to refresh from Drive"></span>
+      <span id="drive-sync-status" style="font-size:13px; font-weight:600; color:rgba(255,255,255,0.85); margin-right:4px; cursor:pointer;" onclick="manualSync()" title="Click to refresh from Drive"></span>
       <span class="nav-user" id="nav-user-email"></span>
       <span class="nav-role-pill" id="nav-role-label"></span>
       <button class="nav-logout" onclick="doLogout()">Sign out</button>
@@ -1608,7 +1608,7 @@ const DEMO_USERS = {
 // Admin whitelist — only these emails get admin access
 const ADMIN_EMAILS = ['portal@hindikineev.org', 'rajiv@hindikineev.org'];
 
-let selectedRole = 'admin';
+let selectedRole = 'teacher';
 function selectRole(role) {
   selectedRole = role;
   document.querySelectorAll('.role-btn').forEach(b => b.classList.remove('selected'));
@@ -2410,6 +2410,9 @@ function renderStudentTable() {
   const status  = document.getElementById('filter-status')?.value || '';
   const teacher = document.getElementById('filter-teacher')?.value || '';
   const classLevel = document.getElementById('filter-level')?.value || '';
+
+  // Persist current filter selections so they survive modal open/close re-renders
+  currentStudentFilter = { name, session, status, teacher, classLevel };
 
   let students = DB.searchStudents({ name, session, status, teacher, classLevel });
 
@@ -4641,10 +4644,10 @@ const DriveSync = {
     const el = document.getElementById('drive-sync-status');
     if (!el) return;
     const states = {
-      syncing: { text: '☁️ Syncing…',  color: 'var(--warning)' },
-      synced:  { text: '☁️ Synced ✓',  color: 'var(--success)' },
-      error:   { text: '☁️ Sync error ⚠', color: 'var(--danger)' },
-      offline: { text: '☁️ Offline',   color: 'var(--ink-light)' },
+      syncing: { text: '☁️ Syncing…',  color: '#FFD080' },
+      synced:  { text: '☁️ Synced ✓',  color: '#7FECB0' },
+      error:   { text: '☁️ Sync error ⚠', color: '#FF9090' },
+      offline: { text: '☁️ Offline',   color: 'rgba(255,255,255,0.5)' },
     };
     const s = states[state] || states.offline;
     el.textContent = s.text;
