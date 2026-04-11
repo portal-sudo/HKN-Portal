@@ -6174,17 +6174,28 @@ function _intakeLookupCore() {
   }
 
   // Helper: normalise a DOB string to YYYY-MM-DD for comparison
-  const normDob = d => (d || '').trim().replace(/\//g, '-');
+  const normDob = d => {
+    if (!d) return '';
+    d = d.trim();
+    // Already YYYY-MM-DD (from HTML date input)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+    // MM/DD/YYYY or MM-DD-YYYY → YYYY-MM-DD
+    const m = d.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (m) return m[3] + '-' + m[1].padStart(2,'0') + '-' + m[2].padStart(2,'0');
+    // Fallback: replace slashes only
+    return d.replace(/\//g, '-');
+  };
 
   const all = DB.getStudents();
   const found = all.find(s => {
     const emailMatch  = (s.parentEmail || '').toLowerCase() === parentEmail;
     const nameMatch   = s.firstName.toLowerCase().includes(studentName) ||
                         studentName.includes(s.firstName.toLowerCase());
-    // Parent name: must match at least one token of the stored name
-    const pName       = parentName.toLowerCase();
-    const pFull       = ((s.parentFirstName || '') + ' ' + (s.parentLastName || '')).toLowerCase();
-    const parentMatch = pFull.includes(pName) || pName.includes(pFull.split(' ')[0]);
+    // Parent name: match any typed token against stored first or last name
+    const pTokens     = parentName.toLowerCase().split(/\s+/).filter(Boolean);
+    const pFirst      = (s.parentFirstName || '').toLowerCase();
+    const pLast       = (s.parentLastName  || '').toLowerCase();
+    const parentMatch = pTokens.some(t => pFirst.includes(t) || pLast.includes(t));
     // DOB: always required
     const dobMatch    = normDob(s.dob) === normDob(studentDob);
     return emailMatch && nameMatch && parentMatch && dobMatch;
