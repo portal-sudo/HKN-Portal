@@ -6142,8 +6142,8 @@ function intakeLookup() {
   const studentName = document.getElementById('intake-student-name').value.trim().toLowerCase();
   const studentDob  = document.getElementById('intake-student-dob').value.trim();
 
-  if (!parentEmail || !studentName) {
-    showToast('Please fill in email and student name', 'error'); return;
+  if (!parentEmail || !studentName || !parentName || !studentDob) {
+    showToast('Please fill in all four fields: parent name, email, student name, and date of birth', 'error'); return;
   }
 
   // Helper: normalise a DOB string to YYYY-MM-DD for comparison
@@ -6154,12 +6154,12 @@ function intakeLookup() {
     const emailMatch  = (s.parentEmail || '').toLowerCase() === parentEmail;
     const nameMatch   = s.firstName.toLowerCase().includes(studentName) ||
                         studentName.includes(s.firstName.toLowerCase());
-    // Parent name: at least one of first/last name token matches
-    const pName       = (parentName || '').toLowerCase();
+    // Parent name: must match at least one token of the stored name
+    const pName       = parentName.toLowerCase();
     const pFull       = ((s.parentFirstName || '') + ' ' + (s.parentLastName || '')).toLowerCase();
-    const parentMatch = !pName || pFull.includes(pName) || pName.includes(pFull.split(' ')[0]);
-    // DOB: only enforce when the caller supplied a value
-    const dobMatch    = !studentDob || normDob(s.dob) === normDob(studentDob);
+    const parentMatch = pFull.includes(pName) || pName.includes(pFull.split(' ')[0]);
+    // DOB: always required
+    const dobMatch    = normDob(s.dob) === normDob(studentDob);
     return emailMatch && nameMatch && parentMatch && dobMatch;
   });
 
