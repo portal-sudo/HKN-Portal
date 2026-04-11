@@ -5,6 +5,7 @@
 <meta name="cf-2fa-verify" content="no-email-obfuscation"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>HKN — Hindi Ki Neev School</title>
+<script src="https://www.google.com/recaptcha/api.js?render=6LeXpLIsAAAAANgHfPNFVoDps5_4StAO-4s7LnQt" async defer></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Nunito:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 <style>
@@ -473,7 +474,23 @@ tbody tr { transition: background var(--transition); }
     <!-- Step 1: Lookup -->
     <div class="intake-step active card" id="intake-step-1">
       <div class="intake-step-title">Welcome to HKN Enrollment</div>
-      <div class="intake-step-subtitle">Please enter your details to get started. We'll look up your student record.</div>
+      <div class="intake-step-subtitle">Sign in with Google to look up your student record — or fill in your details manually.</div>
+
+      <!-- Google sign-in (primary path) -->
+      <button class="btn btn-primary w-full" onclick="doParentGoogleLogin()" style="justify-content:center; gap:10px; font-size:15px; margin-bottom:10px;">
+        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" style="width:20px;height:20px;vertical-align:middle;"/> Sign in with Google
+      </button>
+      <div style="font-size:12px; color:var(--ink-light); text-align:center; margin-bottom:18px;">
+        We'll match your Google account email to your student record automatically.
+      </div>
+
+      <!-- Divider -->
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:18px;">
+        <div style="flex:1; height:1px; background:var(--olive-mid);"></div>
+        <span style="font-size:12px; color:var(--ink-light);">or enter details manually</span>
+        <div style="flex:1; height:1px; background:var(--olive-mid);"></div>
+      </div>
+
       <div class="form-group" style="margin-bottom:14px;">
         <label class="form-label">Parent / Guardian Name</label>
         <input type="text" class="form-input" id="intake-parent-name" placeholder="First Last"/>
@@ -1693,6 +1710,66 @@ async function doGoogleLogin() {
 
 // Keep doLogin as fallback (unused but harmless)
 function doLogin() {}
+
+// ── PARENT GOOGLE SIGN-IN (from public intake form) ──────────
+async function doParentGoogleLogin() {
+  try {
+    await GMAIL.ensureLoaded();
+  } catch(e) {
+    showToast('Could not load Google Sign-In. Please fill in the form manually.', 'error'); return;
+  }
+  const clientId = GMAIL.getClientId();
+  try {
+    const email = await new Promise((resolve, reject) => {
+      const tc = google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: 'openid email profile',
+        callback: async (resp) => {
+          if (resp.error) { reject(new Error(resp.error_description || resp.error)); return; }
+          try {
+            const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+              headers: { Authorization: 'Bearer ' + resp.access_token }
+            });
+            const info = await r.json();
+            if (!info.email) { reject(new Error('Could not retrieve email from Google')); return; }
+            resolve(info.email.toLowerCase());
+          } catch(e) { reject(e); }
+        },
+        error_callback: (err) => reject(new Error((err?.message || err?.type) || 'Sign-in cancelled')),
+      });
+      tc.requestAccessToken({ prompt: 'select_account' });
+    });
+
+    // Tier 1: match against parentEmail
+    const activeStudents = DB.getStudents().filter(s => s.status === 'Active');
+    let matched = activeStudents.find(s => (s.parentEmail || '').toLowerCase() === email);
+    // Tier 2: match against altContactEmail
+    if (!matched) {
+      matched = activeStudents.find(s => (s.altContactEmail || '').toLowerCase() === email);
+    }
+    if (matched) {
+      // Jump straight to the info/enrollment view
+      intakeState.student    = matched;
+      intakeState.isNew      = false;
+      intakeState.isInterest = false;
+      const activeSess = SessionEngine.getActiveSession();
+      const openSess   = DB.getSessions().find(s => s.enrollmentOpen);
+      if (matched.status === 'Active' && !openSess) {
+        renderIntakeInfoView(matched, activeSess);
+        intakeGoStep('1c');
+      } else {
+        renderIntakeBioForm(matched, false);
+        intakeGoStep(2);
+      }
+    } else {
+      // Tier 3: pre-fill email in the manual form and let parent complete it
+      document.getElementById('intake-parent-email').value = email;
+      showToast('Google account not matched — please complete the form below.', 'warning');
+    }
+  } catch(e) {
+    showToast('Sign-in failed: ' + (e.message || 'Please try the manual form.'), 'error');
+  }
+}
 
 // Manual sync — pulls latest from Drive first, then saves local changes on top
 // This is the safe way to sync when multiple admins may be logged in
@@ -6148,6 +6225,24 @@ function renderIntakeInfoView(student, currentSess) {
 }
 
 function intakeLookup() {
+  const RECAPTCHA_SITE_KEY = '6LeXpLIsAAAAANgHfPNFVoDps5_4StAO-4s7LnQt';
+  // Execute reCAPTCHA v3 — if unavailable (e.g. localhost without key), proceed anyway
+  const doLookup = () => _intakeLookupCore();
+  if (typeof grecaptcha !== 'undefined' && grecaptcha.execute) {
+    grecaptcha.ready(() => {
+      grecaptcha.execute(RECAPTCHA_SITE_KEY, { action: 'intake_lookup' }).then(token => {
+        // Score is evaluated client-side for signal; server-side verification not available
+        // in a pure client-side app, so we accept any successful token generation
+        if (token) { doLookup(); }
+        else { showToast('reCAPTCHA check failed. Please try again.', 'error'); }
+      }).catch(() => doLookup()); // fallback: proceed if reCAPTCHA errors
+    });
+  } else {
+    doLookup(); // reCAPTCHA not loaded yet — proceed
+  }
+}
+
+function _intakeLookupCore() {
   const parentName  = document.getElementById('intake-parent-name').value.trim();
   const parentEmail = document.getElementById('intake-parent-email').value.trim().toLowerCase();
   const studentName = document.getElementById('intake-student-name').value.trim().toLowerCase();
