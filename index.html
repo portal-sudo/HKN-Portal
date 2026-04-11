@@ -5295,12 +5295,23 @@ function loadEmailRecipients() {
   if (_feeReminderIds.length > 0) {
     students = students.filter(s => _feeReminderIds.includes(s.id));
   }
-  // Teachers only see parents of their own students
+  // Teachers only see parents of their own students in the selected (or active) session
   if (isTeacher) {
-    const activeSess = SessionEngine.getActiveSession();
-    students = students.filter(s =>
-      (s.sessionData || []).some(sd => sd.teacher === currentUser.name || sd.teacher === currentUser.email.split('@')[0])
-    );
+    const filterSess = session || SessionEngine.getActiveSession()?.name || '';
+    const tName  = (currentUser.name  || '').toLowerCase();
+    const tEmail = (currentUser.email || '').toLowerCase();
+    const tPrefix = tEmail.split('@')[0];
+    students = students.filter(s => {
+      // Find the session entry for the relevant session
+      const sd = filterSess
+        ? (s.sessionData || []).find(d => d.session === filterSess)
+        : (s.sessionData || [])[0];
+      if (!sd) return false;
+      const teacherFieldLc = (sd.teacher || '').toLowerCase();
+      return teacherFieldLc.includes(tName) ||
+             teacherFieldLc.includes(tPrefix) ||
+             teacherFieldLc === tEmail;
+    });
   }
   const el = document.getElementById('email-recipients');
   if (!el) return;
