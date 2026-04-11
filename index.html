@@ -1740,31 +1740,60 @@ async function doParentGoogleLogin() {
       tc.requestAccessToken({ prompt: 'select_account' });
     });
 
-    // Tier 1: match against parentEmail
+    // Tier 1: match against parentEmail, Tier 2: altContactEmail
     const activeStudents = DB.getStudents().filter(s => s.status === 'Active');
-    let matched = activeStudents.find(s => (s.parentEmail || '').toLowerCase() === email);
-    // Tier 2: match against altContactEmail
-    if (!matched) {
-      matched = activeStudents.find(s => (s.altContactEmail || '').toLowerCase() === email);
-    }
-    if (matched) {
-      // Jump straight to the info/enrollment view
-      intakeState.student    = matched;
-      intakeState.isNew      = false;
-      intakeState.isInterest = false;
-      const activeSess = SessionEngine.getActiveSession();
-      const openSess   = DB.getSessions().find(s => s.enrollmentOpen);
-      if (matched.status === 'Active' && !openSess) {
-        renderIntakeInfoView(matched, activeSess);
-        intakeGoStep('1c');
-      } else {
-        renderIntakeBioForm(matched, false);
-        intakeGoStep(2);
-      }
-    } else {
-      // Tier 3: pre-fill email in the manual form and let parent complete it
+    let emailMatches = activeStudents.filter(s =>
+      (s.parentEmail || '').toLowerCase() === email ||
+      (s.altContactEmail || '').toLowerCase() === email
+    );
+
+    if (emailMatches.length === 0) {
+      // No match — pre-fill email and let parent complete the manual form
       document.getElementById('intake-parent-email').value = email;
       showToast('Google account not matched — please complete the form below.', 'warning');
+      return;
+    }
+
+    // Use student name and/or DOB already entered to narrow down if multiple matches
+    const enteredName = (document.getElementById('intake-student-name').value || '').trim().toLowerCase();
+    const enteredDob  = (document.getElementById('intake-student-dob').value || '').trim();
+    const normDob = d => (d || '').trim().replace(/\//g, '-');
+
+    let matched = null;
+    if (emailMatches.length === 1) {
+      matched = emailMatches[0];
+    } else {
+      // Multiple children — narrow using name and/or DOB (Tier-3 logic)
+      const byName = enteredName
+        ? emailMatches.filter(s =>
+            s.firstName.toLowerCase().includes(enteredName) ||
+            enteredName.includes(s.firstName.toLowerCase()))
+        : emailMatches;
+      const byDob = enteredDob
+        ? byName.filter(s => normDob(s.dob) === normDob(enteredDob))
+        : byName;
+      if (byDob.length === 1) {
+        matched = byDob[0];
+      } else {
+        // Still ambiguous — pre-fill email and prompt for child name/DOB
+        document.getElementById('intake-parent-email').value = email;
+        showToast('Multiple students found — please enter your child\'s name and date of birth below.', 'warning');
+        return;
+      }
+    }
+
+    // Found exactly one match — proceed
+    intakeState.student    = matched;
+    intakeState.isNew      = false;
+    intakeState.isInterest = false;
+    const activeSess = SessionEngine.getActiveSession();
+    const openSess   = DB.getSessions().find(s => s.enrollmentOpen);
+    if (matched.status === 'Active' && !openSess) {
+      renderIntakeInfoView(matched, activeSess);
+      intakeGoStep('1c');
+    } else {
+      renderIntakeBioForm(matched, false);
+      intakeGoStep(2);
     }
   } catch(e) {
     showToast('Sign-in failed: ' + (e.message || 'Please try the manual form.'), 'error');
