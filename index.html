@@ -6187,6 +6187,20 @@ function _intakeLookupCore() {
   };
 
   const all = DB.getStudents();
+  // DEBUG — remove after fix confirmed
+  console.log('=== intakeLookup debug ===');
+  console.log('Input parentEmail:', parentEmail);
+  console.log('Input studentName:', studentName);
+  console.log('Input parentName:', parentName);
+  console.log('Input studentDob (raw):', studentDob, '→ normalised:', normDob(studentDob));
+  all.filter(s => s.status === 'Active').forEach(s => {
+    console.log('---');
+    console.log('  stored parentEmail:', (s.parentEmail||'').toLowerCase());
+    console.log('  stored firstName:', s.firstName.toLowerCase());
+    console.log('  stored parentFirst:', (s.parentFirstName||'').toLowerCase());
+    console.log('  stored parentLast:', (s.parentLastName||'').toLowerCase());
+    console.log('  stored dob (raw):', s.dob, '→ normalised:', normDob(s.dob));
+  });
   const found = all.find(s => {
     const emailMatch  = (s.parentEmail || '').toLowerCase() === parentEmail;
     const nameMatch   = s.firstName.toLowerCase().includes(studentName) ||
