@@ -6037,10 +6037,18 @@ function showPublicIntake() {
   intakeState = {};
   AppState.intakeScores = { speaking: 0, reading: 0, writing: 0 };
   showScreen('public-intake');
-  // Load latest data from Drive so the student lookup has current records
-  if (typeof DriveSync !== 'undefined') {
-    DriveSync.load().catch(() => {}); // silent — form still works from localStorage if Drive fails
-  }
+  // Fetch Drive data without OAuth — works because file is shared "Anyone with link can view"
+  // No Authorization header needed for publicly shared Drive files
+  const fileId = DriveSync.fileId;
+  fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`)
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (data && Object.keys(data).length > 0) {
+        DB.restoreBackup(data);
+        console.log('Public intake: loaded', DB.getStudents().length, 'students from Drive');
+      }
+    })
+    .catch(e => console.warn('Public intake Drive fetch failed:', e.message));
 }
 
 function renderIntakeInfoView(student, currentSess) {
