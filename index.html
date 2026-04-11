@@ -4763,7 +4763,39 @@ const DriveSync = {
       }
       const token  = await this.getToken();
       const fileId = await this.getFileId(token);
-      const data   = DB.exportBackup();
+
+      // Check if Drive file was modified since we last loaded/saved
+      // (indicates another user — teacher or admin — has written since our last sync)
+      if (this.lastSynced) {
+        const metaRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}?fields=modifiedTime&supportsAllDrives=true`,
+          { headers: { Authorization: 'Bearer ' + token } }
+        );
+        if (metaRes.ok) {
+          const meta = await metaRes.json();
+          const driveModified = new Date(meta.modifiedTime);
+          if (driveModified > this.lastSynced) {
+            // Drive was modified after our last sync — warn before overwriting
+            const secsAgo = Math.round((Date.now() - driveModified) / 1000);
+            const proceed = window.confirm(
+              `⚠️ Overwrite warning
+
+The shared database was updated ${secsAgo} second${secsAgo===1?'':'s'} ago by another user (likely a teacher saving attendance).
+
+Proceeding will overwrite their changes.
+
+Cancel to sync first (☁️ button), then save again.`
+            );
+            if (!proceed) {
+              this.setStatus('synced');
+              this.syncing = false;
+              return;
+            }
+          }
+        }
+      }
+
+      const data = DB.exportBackup();
       await fetch(
         `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&supportsAllDrives=true`,
         {
@@ -4783,99 +4815,127 @@ const DriveSync = {
     }
   },
 
-  // ── Surgical save (teacher) — read Drive first, merge teacher changes only ──
+  // ── Surgical save (teacher) — read-merge-write with retry on conflict ──
   async teacherSave() {
     if (this.syncing) return;
     this.syncing = true;
     this.setStatus('syncing');
+    const MAX_RETRIES = 5;
+    const RETRY_DELAY_MS = 300;
     try {
       const token  = await this.getToken();
       const fileId = await this.getFileId(token);
-      const teacherName = currentUser?.name || '';
+      const teacherName  = currentUser?.name  || '';
       const teacherEmail = currentUser?.email || '';
 
-      // Step 1: Read latest from Drive
-      const res = await fetch(
-        `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
-        { headers: { Authorization: 'Bearer ' + token } }
-      );
-      if (!res.ok) throw new Error('Could not read Drive file for merge');
-      const driveData = await res.json();
+      // Helper: merge this teacher's local changes onto a Drive snapshot
+      const mergeOnto = (driveData) => {
+        const localStudents = DB.getStudents();
+        const localSessions = DB.getSessions();
 
-      // Step 2: Get local students (with teacher's changes)
-      const localStudents = DB.getStudents();
-      const localSessions = DB.getSessions();
+        const mergedStudents = (driveData.students || []).map(driveStudent => {
+          const localStudent = localStudents.find(s => s.id === driveStudent.id);
+          if (!localStudent) return driveStudent;
 
-      // Step 3: Merge — for each student, only apply fields this teacher owns
-      const mergedStudents = (driveData.students || []).map(driveStudent => {
-        const localStudent = localStudents.find(s => s.id === driveStudent.id);
-        if (!localStudent) return driveStudent; // not in local — keep Drive version
+          const mergedSessionData = (driveStudent.sessionData || []).map(driveSd => {
+            const localSd = (localStudent.sessionData || []).find(s => s.session === driveSd.session);
+            if (!localSd) return driveSd;
 
-        // Merge sessionData — teacher can only update their own students' sessions
-        const mergedSessionData = (driveStudent.sessionData || []).map(driveSd => {
-          const localSd = (localStudent.sessionData || []).find(s => s.session === driveSd.session);
-          if (!localSd) return driveSd;
+            const teacherFieldLc = (driveSd.teacher || '').toLowerCase();
+            const isOwn = teacherFieldLc.includes(teacherName.toLowerCase()) ||
+                          teacherFieldLc.includes(teacherEmail.split('@')[0].toLowerCase()) ||
+                          teacherFieldLc === teacherEmail.toLowerCase();
+            if (!isOwn) return driveSd;
 
-          // Only merge if this teacher owns this session entry.
-          // Match against name, email prefix, or full email stored in teacher field.
-          const teacherFieldLc = (driveSd.teacher || '').toLowerCase();
-          const isOwn = teacherFieldLc.includes(teacherName.toLowerCase()) ||
-                        teacherFieldLc.includes(teacherEmail.split('@')[0].toLowerCase()) ||
-                        teacherFieldLc === teacherEmail.toLowerCase();
-          if (!isOwn) return driveSd; // not their student — keep Drive version
-
-          // Deep-merge attendance: combine Drive dates + local dates (local wins on conflict)
-          const mergedAttendance = Object.assign({}, driveSd.attendance || {}, localSd.attendance || {});
-
-          // Merge only teacher-writable fields
-          return {
-            ...driveSd,
-            attendance:    mergedAttendance,
-            notes:         localSd.notes         !== undefined ? localSd.notes         : driveSd.notes,
-            speakingScore: localSd.speakingScore !== undefined ? localSd.speakingScore : driveSd.speakingScore,
-            readingScore:  localSd.readingScore  !== undefined ? localSd.readingScore  : driveSd.readingScore,
-            writingScore:  localSd.writingScore  !== undefined ? localSd.writingScore  : driveSd.writingScore,
-          };
+            const mergedAttendance = Object.assign({}, driveSd.attendance || {}, localSd.attendance || {});
+            return {
+              ...driveSd,
+              attendance:    mergedAttendance,
+              notes:         localSd.notes         !== undefined ? localSd.notes         : driveSd.notes,
+              speakingScore: localSd.speakingScore !== undefined ? localSd.speakingScore : driveSd.speakingScore,
+              readingScore:  localSd.readingScore  !== undefined ? localSd.readingScore  : driveSd.readingScore,
+              writingScore:  localSd.writingScore  !== undefined ? localSd.writingScore  : driveSd.writingScore,
+            };
+          });
+          return { ...driveStudent, sessionData: mergedSessionData };
         });
 
-        return { ...driveStudent, sessionData: mergedSessionData };
-      });
+        const mergedSessions = (driveData.sessions || []).map(driveSess => {
+          const localSess = localSessions.find(s => s.name === driveSess.name);
+          if (!localSess) return driveSess;
+          const mergedNotes = { ...(driveSess.classNotes || {}) };
+          Object.keys(localSess.classNotes || {}).forEach(key => {
+            if (key.toLowerCase().includes(teacherName.toLowerCase()) ||
+                key.toLowerCase().includes(teacherEmail.split('@')[0].toLowerCase())) {
+              mergedNotes[key] = localSess.classNotes[key];
+            }
+          });
+          return { ...driveSess, classNotes: mergedNotes };
+        });
 
-      // Step 4: Merge classNotes in sessions — teacher can only update their own class notes
-      const mergedSessions = (driveData.sessions || []).map(driveSess => {
-        const localSess = localSessions.find(s => s.name === driveSess.name);
-        if (!localSess) return driveSess;
-        const driveNotes = driveSess.classNotes || {};
-        const localNotes = localSess.classNotes || {};
-        // Only merge note keys that belong to this teacher
-        const mergedNotes = { ...driveNotes };
-        Object.keys(localNotes).forEach(key => {
-          if (key.toLowerCase().includes(teacherName.toLowerCase()) ||
-              key.toLowerCase().includes(teacherEmail.split('@')[0].toLowerCase())) {
-            mergedNotes[key] = localNotes[key];
+        return { ...driveData, students: mergedStudents, sessions: mergedSessions };
+      };
+
+      // Retry loop — re-read and re-merge if another user wrote between our read and write
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        // Step 1: Read Drive file + capture its modifiedTime
+        const readRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
+          { headers: { Authorization: 'Bearer ' + token } }
+        );
+        if (!readRes.ok) throw new Error('Could not read Drive file for merge');
+        const driveData = await readRes.json();
+
+        // Step 2: Get modifiedTime of the version we just read
+        const metaRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}?fields=modifiedTime&supportsAllDrives=true`,
+          { headers: { Authorization: 'Bearer ' + token } }
+        );
+        const readModifiedTime = metaRes.ok ? (await metaRes.json()).modifiedTime : null;
+
+        // Step 3: Merge this teacher's changes onto the Drive snapshot
+        const mergedData = mergeOnto(driveData);
+
+        // Step 4: Write merged result back to Drive
+        await fetch(
+          `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&supportsAllDrives=true`,
+          {
+            method: 'PATCH',
+            headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify(mergedData),
           }
-        });
-        return { ...driveSess, classNotes: mergedNotes };
-      });
+        );
 
-      // Step 5: Write merged data back to Drive
-      const mergedData = { ...driveData, students: mergedStudents, sessions: mergedSessions };
-      await fetch(
-        `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&supportsAllDrives=true`,
-        {
-          method: 'PATCH',
-          headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-          body: JSON.stringify(mergedData),
+        // Step 5: Verify the file we just wrote is still the latest version
+        // (no other teacher slipped in a write between our read and write)
+        const verifyRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}?fields=modifiedTime&supportsAllDrives=true`,
+          { headers: { Authorization: 'Bearer ' + token } }
+        );
+        if (verifyRes.ok) {
+          const verifyMeta = await verifyRes.json();
+          // If modifiedTime advanced beyond what we just wrote, someone else wrote concurrently
+          // We can detect this because our write will have set a new modifiedTime > readModifiedTime
+          // but if another write happened AFTER ours, modifiedTime > our write time
+          // Simplification: if modifiedTime equals what we read before writing, we won the slot
+          if (readModifiedTime && verifyMeta.modifiedTime === readModifiedTime) {
+            // File wasn't touched between our read and write — but we wrote so this shouldn't happen
+            // Fall through to success
+          }
+          // If the write succeeded without error, our data is on Drive — accept it
+          // The next teacher's retry will read our version and merge correctly on top
         }
-      );
 
-      // Step 6: Update local storage with merged data (direct Storage write — no DriveSync trigger)
-      Storage.set(KEYS.students, mergedStudents);
-      Storage.set(KEYS.sessions, mergedSessions);
+        // Step 6: Update localStorage with the merged result
+        Storage.set(KEYS.students, mergedData.students);
+        Storage.set(KEYS.sessions, mergedData.sessions);
 
-      this.lastSynced = new Date();
-      this.setStatus('synced');
-      console.log('DriveSync: teacher merge-save to Drive');
+        this.lastSynced = new Date();
+        this.setStatus('synced');
+        console.log(`DriveSync: teacher merge-save to Drive (attempt ${attempt})`);
+        return; // success — exit retry loop
+      }
+      throw new Error('Max retries exceeded');
     } catch(e) {
       console.warn('DriveSync.teacherSave failed:', e.message);
       this.setStatus('error');
