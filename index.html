@@ -6625,6 +6625,7 @@ function intakeSaveBio() {
 
   DB.saveStudent(updated);
   intakeState.savedStudent = updated;
+  console.log('updated.status:', updated.status, '| isInterest:', intakeState.isInterest);
 
   // Save to Drive via Apps Script — needed for both interest registrations
   // and Invited→In-Process enrollments (no logged-in user, DriveSync can't fire)
