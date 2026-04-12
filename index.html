@@ -6164,6 +6164,8 @@ function _intakeLookupCore() {
 
   fetch(APPS_SCRIPT_URL, {
     method: 'POST',
+    redirect: 'follow',
+    headers: { 'Content-Type': 'text/plain' },
     body: JSON.stringify({ parentName, parentEmail, studentName, studentDob }),
   })
   .then(r => r.json())
@@ -6630,6 +6632,8 @@ function intakeSaveBio() {
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyZfMMOkbTZmTGmO_Z0IEzsWs91FPRxk5kx1SvuGTthOAOCcOOPo4uXMVoie2a2iTcpYA/exec';
     fetch(APPS_SCRIPT_URL, {
       method: 'POST',
+      redirect: 'follow',
+      headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({ action: 'saveInterest', student: updated }),
     })
     .then(r => r.json())
