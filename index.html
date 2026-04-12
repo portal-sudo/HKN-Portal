@@ -2455,7 +2455,9 @@ function renderStudentTable() {
 
   tbody.innerHTML = students.map(s => {
     const sesKey = session || activeSess?.name || '';
-    const sd = (s.sessionData||[]).find(d => d.session === sesKey) || {};
+    // For teacher/level display: use sesKey session data, or fall back to most recent session with data
+    const sd = (s.sessionData||[]).find(d => d.session === sesKey) ||
+               (s.sessionData||[]).slice(-1)[0] || {};
     return `
       <tr style="cursor:pointer;" onclick="openStudentModal('${s.id}')">
         <td style="font-family:var(--serif); font-size:12px; color:var(--ink-light);">${s.studentId || '—'}</td>
@@ -2513,7 +2515,7 @@ function openStudentModal(studentId) {
     `<div class="form-group"><label class="form-label">${label}</label>${content}</div>`;
 
   const selField = (id, val, options, extraAttr='') =>
-    `<select class="form-select" id="sf-${id}" ${extraAttr}><option value="">Select…</option>${options.map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}</select>`;
+    `<select class="form-select" id="sf-${id}" ${extraAttr}><option value="">— Select —</option>${options.map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}</select>`;
 
   // Show sessions the student was enrolled in, plus the enrollment-open session
   // for In-Process students so admin can mark fees paid and trigger promotion
@@ -6689,19 +6691,52 @@ function intakeSaveBio() {
   if (intakeState.isInterest || updated.status === 'In-Process') {
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyZfMMOkbTZmTGmO_Z0IEzsWs91FPRxk5kx1SvuGTthOAOCcOOPo4uXMVoie2a2iTcpYA/exec';
     const action = intakeState.isInterest ? 'saveInterest' : 'saveEnrolled';
-    // Use GET with encoded payload to avoid POST redirect stripping the body
     const payload = encodeURIComponent(JSON.stringify({ action, student: updated }));
     fetch(APPS_SCRIPT_URL + '?payload=' + payload)
     .then(r => r.json())
     .then(res => {
-      if (res.saved) console.log(action + ' saved to Drive');
-      else console.warn(action + ' save response:', res);
+      if (res.saved) {
+        console.log(action + ' saved to Drive');
+        if (intakeState.isInterest) {
+          renderIntakeConfirmation(updated);
+          intakeGoStep(3);
+        }
+      } else if (res.reason === 'duplicate' && action === 'saveInterest') {
+        // Already on interest list — show friendly message
+        document.getElementById('intake-confirmation').innerHTML = `
+          <div style="text-align:center; margin-bottom:20px;">
+            <div style="font-size:48px; margin-bottom:8px;">📋</div>
+            <div style="font-family:var(--serif); font-size:22px; font-weight:600; color:var(--olive);">Already Registered</div>
+          </div>
+          <div style="background:var(--olive-pale); border-radius:var(--radius-md); padding:16px 18px; font-size:14px; color:var(--ink-mid); line-height:1.7;">
+            <strong>${escHtml(updated.firstName)}</strong> is already on our interest list.
+            The HKN team will be in touch when a spot becomes available. No further action is needed.
+          </div>`;
+        intakeGoStep(3);
+      } else {
+        console.warn(action + ' save response:', res);
+        if (intakeState.isInterest) {
+          renderIntakeConfirmation(updated);
+          intakeGoStep(3);
+        }
+      }
     })
-    .catch(err => console.warn(action + ' save to Drive failed:', err.message));
+    .catch(err => {
+      console.warn(action + ' save to Drive failed:', err.message);
+      if (intakeState.isInterest) {
+        renderIntakeConfirmation(updated);
+        intakeGoStep(3);
+      }
+    });
+    // For enrolled students, show confirmation immediately (save is fire-and-forget)
+    if (!intakeState.isInterest) {
+      renderIntakeConfirmation(updated);
+      intakeGoStep(3);
+    }
+  } else {
+    renderIntakeConfirmation(updated);
+    intakeGoStep(3);
   }
-
-  renderIntakeConfirmation(updated);
-  intakeGoStep(3);
 }
 
 function renderIntakeConfirmation(student) {
