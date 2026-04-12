@@ -5,7 +5,6 @@
 <meta name="cf-2fa-verify" content="no-email-obfuscation"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>HKN — Hindi Ki Neev School</title>
-<script src="https://www.google.com/recaptcha/api.js?render=6LeXpLIsAAAAANgHfPNFVoDps5_4StAO-4s7LnQt" async defer></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Nunito:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 <style>
@@ -6142,18 +6141,7 @@ function renderIntakeInfoView(student, currentSess) {
 }
 
 function intakeLookup() {
-  const RECAPTCHA_SITE_KEY = '6LeXpLIsAAAAANgHfPNFVoDps5_4StAO-4s7LnQt';
-  const doLookup = () => _intakeLookupCore();
-  if (typeof grecaptcha !== 'undefined' && grecaptcha.execute) {
-    grecaptcha.ready(() => {
-      grecaptcha.execute(RECAPTCHA_SITE_KEY, { action: 'intake_lookup' }).then(token => {
-        if (token) { doLookup(); }
-        else { showToast('reCAPTCHA check failed. Please try again.', 'error'); }
-      }).catch(() => doLookup()); // fallback: proceed if reCAPTCHA errors
-    });
-  } else {
-    doLookup(); // reCAPTCHA not loaded yet — proceed
-  }
+  _intakeLookupCore();
 }
 
 function _intakeLookupCore() {
