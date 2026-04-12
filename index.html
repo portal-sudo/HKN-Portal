@@ -6162,7 +6162,7 @@ function _intakeLookupCore() {
   btn.textContent = 'Looking up…';
   btn.disabled = true;
 
-  fetch(APPS_SCRIPT_URL + '?t=' + Date.now(), {
+  fetch(APPS_SCRIPT_URL + '?t=' + Date.now() + '&action=lookup', {
     method: 'POST',
     body: JSON.stringify({ parentName, parentEmail, studentName, studentDob }),
   })
@@ -6632,7 +6632,7 @@ function intakeSaveBio() {
   if (intakeState.isInterest || updated.status === 'In-Process') {
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyZfMMOkbTZmTGmO_Z0IEzsWs91FPRxk5kx1SvuGTthOAOCcOOPo4uXMVoie2a2iTcpYA/exec';
     const action = intakeState.isInterest ? 'saveInterest' : 'saveEnrolled';
-    fetch(APPS_SCRIPT_URL + '?t=' + Date.now(), {
+    fetch(APPS_SCRIPT_URL + '?t=' + Date.now() + '&action=' + action, {
       method: 'POST',
       body: JSON.stringify({ action, student: updated }),
     })
