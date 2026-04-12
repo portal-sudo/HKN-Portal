@@ -6168,6 +6168,7 @@ function _intakeLookupCore() {
   })
   .then(r => r.json())
   .then(result => {
+    console.log('Apps Script raw result:', JSON.stringify(result));
     btn.textContent = origText;
     btn.disabled = false;
 
@@ -6245,6 +6246,7 @@ function _intakeLookupCore() {
   .catch(err => {
     btn.textContent = origText;
     btn.disabled = false;
+    console.error('Apps Script fetch error:', err);
     showToast('Could not reach lookup service. Please try again.', 'error');
     console.warn('Apps Script lookup failed:', err.message);
   });
