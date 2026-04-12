@@ -2455,9 +2455,12 @@ function renderStudentTable() {
 
   tbody.innerHTML = students.map(s => {
     const sesKey = session || activeSess?.name || '';
-    // For teacher/level display: use sesKey session data, or fall back to most recent session with data
-    const sd = (s.sessionData||[]).find(d => d.session === sesKey) ||
-               (s.sessionData||[]).slice(-1)[0] || {};
+    // For teacher/level display: use sesKey session data if it has a teacher,
+    // otherwise fall back to most recent session with a teacher assigned
+    const sdExact = (s.sessionData||[]).find(d => d.session === sesKey) || {};
+    const sd = (sdExact.teacher || sdExact.classLevel)
+      ? sdExact
+      : (s.sessionData||[]).slice().reverse().find(d => d.teacher || d.classLevel) || sdExact;
     return `
       <tr style="cursor:pointer;" onclick="openStudentModal('${s.id}')">
         <td style="font-family:var(--serif); font-size:12px; color:var(--ink-light);">${s.studentId || '—'}</td>
