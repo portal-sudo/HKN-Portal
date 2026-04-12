@@ -6178,6 +6178,7 @@ function _intakeLookupCore() {
     if (result.found) {
       const found    = result.student;
       const openSess = result.openSess || null;
+      console.log('found status:', found.status, '| openSess:', openSess ? openSess.name : 'null', '| enrollmentOpen:', openSess?.enrollmentOpen);
 
       // Helper: find the session to show for Active students —
       // current underway session (today between first/last class) or most recently started
