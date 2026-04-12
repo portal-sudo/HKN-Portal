@@ -6168,7 +6168,7 @@ function _intakeLookupCore() {
   })
   .then(r => r.json())
   .then(result => {
-    console.log('openSess from result:', JSON.stringify(result.openSess));
+    console.log('FULL result:', JSON.stringify(result));
     btn.textContent = origText;
     btn.disabled = false;
 
