@@ -6162,7 +6162,7 @@ function _intakeLookupCore() {
   btn.textContent = 'Looking up…';
   btn.disabled = true;
 
-  fetch(APPS_SCRIPT_URL, {
+  fetch(APPS_SCRIPT_URL + '?t=' + Date.now(), {
     method: 'POST',
     body: JSON.stringify({ parentName, parentEmail, studentName, studentDob }),
   })
@@ -6629,7 +6629,7 @@ function intakeSaveBio() {
   // (public intake form has no logged-in user so DriveSync never fires)
   if (intakeState.isInterest) {
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyZfMMOkbTZmTGmO_Z0IEzsWs91FPRxk5kx1SvuGTthOAOCcOOPo4uXMVoie2a2iTcpYA/exec';
-    fetch(APPS_SCRIPT_URL, {
+    fetch(APPS_SCRIPT_URL + '?t=' + Date.now(), {
       method: 'POST',
       redirect: 'follow',
       headers: { 'Content-Type': 'text/plain' },
