@@ -6164,8 +6164,6 @@ function _intakeLookupCore() {
 
   fetch(APPS_SCRIPT_URL, {
     method: 'POST',
-    redirect: 'follow',
-    headers: { 'Content-Type': 'text/plain' },
     body: JSON.stringify({ parentName, parentEmail, studentName, studentDob }),
   })
   .then(r => r.json())
@@ -6179,14 +6177,15 @@ function _intakeLookupCore() {
     }
 
     if (result.found) {
-      const found    = result.student;
-      const openSess = result.openSess || null;
-      console.log('found status:', found.status, '| openSess:', openSess ? openSess.name : 'null', '| enrollmentOpen:', openSess?.enrollmentOpen);
+      const found          = result.student;
+      const enrollmentOpen = result.enrollmentOpen || false;
+      const openSess       = enrollmentOpen ? { name: result.openSessName, fees: result.openSessFees, enrollmentOpen: true } : null;
+      console.log('enrollmentOpen:', enrollmentOpen, '| openSessName:', result.openSessName);
 
       // Helper: find the session to show for Active students —
       // current underway session (today between first/last class) or most recently started
       const getBestSession = () => {
-        const sessions = result.sessions || [];
+        const sessions = result.sessions || DB.getSessions();
         const today = new Date().toISOString().slice(0,10);
         const underway = sessions.find(s => s.firstClass && s.lastClass &&
           today >= s.firstClass && today <= s.lastClass);
