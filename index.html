@@ -6177,23 +6177,59 @@ function _intakeLookupCore() {
 
     if (result.found) {
       const found = result.student;
-      const eligible = ['Invited','In-Process','Active','Alumni'].includes(found.status);
-      if (!eligible) {
-        showToast(`Record found but status is "${found.status}". Please contact the school.`, 'warning'); return;
-      }
-      intakeState.student    = found;
-      intakeState.isNew      = false;
-      intakeState.isInterest = false;
+      const openSess = DB.getSessions().find(s => s.enrollmentOpen);
 
-      const activeSess = SessionEngine.getActiveSession();
-      const openSess   = DB.getSessions().find(s => s.enrollmentOpen);
-      if (found.status === 'Active' && !openSess) {
-        renderIntakeInfoView(found, activeSess);
+      // Helper: find the session to show for Active students —
+      // current underway session (today between first/last class) or most recently started
+      const getBestSession = () => {
+        const sessions = DB.getSessions();
+        const today = new Date().toISOString().slice(0,10);
+        // Session currently underway
+        const underway = sessions.find(s => s.firstClass && s.lastClass &&
+          today >= s.firstClass && today <= s.lastClass);
+        if (underway) return underway;
+        // Most recently started session that student has data for
+        const studentSessNames = new Set((found.sessionData||[]).map(sd => sd.session));
+        const withData = sessions.filter(s => studentSessNames.has(s.name));
+        return withData.length ? withData[withData.length - 1] : sessions[sessions.length - 1];
+      };
+
+      // ── Case 1: Active ────────────────────────────────────────
+      if (found.status === 'Active') {
+        intakeState.student    = found;
+        intakeState.isNew      = false;
+        intakeState.isInterest = false;
+        renderIntakeInfoView(found, getBestSession());
         intakeGoStep('1c');
         return;
       }
-      renderIntakeBioForm(found, false);
-      intakeGoStep(2);
+
+      // ── Case 2: Invited + no enrollment open ──────────────────
+      if (found.status === 'Invited' && !openSess) {
+        renderIntakeNotYet(found);
+        intakeGoStep('1c');
+        return;
+      }
+
+      // ── Case 3: Invited + enrollment open ─────────────────────
+      if (found.status === 'Invited' && openSess) {
+        intakeState.student    = found;
+        intakeState.isNew      = false;
+        intakeState.isInterest = false;
+        renderIntakeBioForm(found, false);
+        intakeGoStep(2);
+        return;
+      }
+
+      // ── Case 4: In-Process (any enrollment state) ─────────────
+      if (found.status === 'In-Process') {
+        renderIntakeInProcess(found, openSess);
+        intakeGoStep('1c');
+        return;
+      }
+
+      // ── Case 5: Dropped / Alumni / other ─────────────────────
+      showToast(`Your student record was found but has status "${found.status}". Please contact the school at info@hindikineev.org.`, 'warning');
 
     } else {
       // Not found — offer interest registration
@@ -6212,6 +6248,52 @@ function _intakeLookupCore() {
     showToast('Could not reach lookup service. Please try again.', 'error');
     console.warn('Apps Script lookup failed:', err.message);
   });
+}
+
+function renderIntakeNotYet(student) {
+  const firstName = student.firstName || 'your student';
+  document.getElementById('intake-step-1c').innerHTML = `
+    <div style="text-align:center; padding:10px 0 20px;">
+      <div style="font-size:40px; margin-bottom:16px;">🕐</div>
+      <div style="font-size:20px; font-weight:600; color:var(--olive-dark); margin-bottom:10px;">
+        Enrollment Not Open Yet
+      </div>
+      <div style="font-size:14px; color:var(--ink-mid); line-height:1.7; margin-bottom:20px;">
+        We found <strong>${escHtml(firstName)}'s</strong> record — the school has marked them as invited
+        but enrollment for the upcoming session hasn't opened yet.<br><br>
+        Please check back soon. You'll be able to complete enrollment here once the school opens registration.
+      </div>
+      <div style="background:var(--cream-mid); border-radius:var(--radius-md); padding:14px 18px; font-size:13px; color:var(--ink-mid); margin-bottom:24px;">
+        Questions? Contact us at <a href="mailto:info@hindikineev.org" style="color:var(--orange);">info@hindikineev.org</a>
+      </div>
+      <a href="#" onclick="backToLogin()" style="font-size:13px; color:var(--orange);">← Back to portal</a>
+    </div>
+  `;
+}
+
+function renderIntakeInProcess(student, openSess) {
+  const firstName = student.firstName || 'your student';
+  document.getElementById('intake-step-1c').innerHTML = `
+    <div style="text-align:center; padding:10px 0 20px;">
+      <div style="font-size:40px; margin-bottom:16px;">📋</div>
+      <div style="font-size:20px; font-weight:600; color:var(--olive-dark); margin-bottom:10px;">
+        Enrollment Received
+      </div>
+      <div style="font-size:14px; color:var(--ink-mid); line-height:1.7; margin-bottom:20px;">
+        Thank you — we have received <strong>${escHtml(firstName)}'s</strong> enrollment.
+        Confirmation is pending receipt of the enrollment fee.
+      </div>
+      <div style="background:var(--warning-light); border:1px solid rgba(192,120,0,0.25); border-radius:var(--radius-md); padding:16px 18px; font-size:13px; color:var(--ink-mid); line-height:1.7; margin-bottom:20px;">
+        <strong>Action required:</strong> If you haven't already done so, please send the enrollment fee via Zelle to
+        <strong>payments@hindikineev.org</strong>${openSess ? ` (${escHtml(openSess.name)} — $${openSess.fees})` : ''}.
+        Your enrollment will be confirmed once payment is received.
+      </div>
+      <div style="background:var(--cream-mid); border-radius:var(--radius-md); padding:14px 18px; font-size:13px; color:var(--ink-mid); margin-bottom:24px;">
+        Questions? Contact us at <a href="mailto:info@hindikineev.org" style="color:var(--orange);">info@hindikineev.org</a>
+      </div>
+      <a href="#" onclick="backToLogin()" style="font-size:13px; color:var(--orange);">← Back to portal</a>
+    </div>
+  `;
 }
 
 function renderIntakeBioForm(student, isInterest) {
