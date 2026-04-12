@@ -6034,7 +6034,8 @@ function showPublicIntake() {
 function renderIntakeInfoView(student, currentSess) {
   const sessName = currentSess?.name || '';
   const sd = (student.sessionData || []).find(d => d.session === sessName) || {};
-  const sess = DB.getSession(sessName) || {};
+  // Use session passed in (from Apps Script) — DB.getSession() won't work on public form
+  const sess = currentSess || {};
   const today = new Date().toISOString().slice(0,10);
 
   // Attendance summary for current session
@@ -6074,8 +6075,8 @@ function renderIntakeInfoView(student, currentSess) {
               <div style="font-size:14px; font-weight:500; color:var(--ink);">${escHtml(sd.classLevel || '—')}</div>
             </div>
             <div>
-              <div style="font-size:11px; color:var(--ink-light); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:3px;">Level</div>
-              <div style="font-size:14px; font-weight:500; color:var(--ink);">${escHtml(sd.classLevel || '—')}</div>
+              <div style="font-size:11px; color:var(--ink-light); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:3px;">Book</div>
+              <div style="font-size:14px; font-weight:500; color:var(--ink);">${escHtml(sd.bookLevel || '—')}</div>
             </div>
           </div>
         </div>
@@ -6182,14 +6183,15 @@ function _intakeLookupCore() {
       const openSess       = enrollmentOpen ? { name: result.openSessName, fees: result.openSessFees, term: result.openSessTerm, enrollmentOpen: true } : null;
       console.log('enrollmentOpen:', enrollmentOpen, '| openSessName:', result.openSessName);
 
-      // Helper: find the session to show for Active students —
+      // Helper: find the best session to show for Active students —
       // current underway session (today between first/last class) or most recently started
       const getBestSession = () => {
-        const sessions = result.sessions || DB.getSessions();
+        const sessions = result.sessions || [];
         const today = new Date().toISOString().slice(0,10);
         const underway = sessions.find(s => s.firstClass && s.lastClass &&
           today >= s.firstClass && today <= s.lastClass);
         if (underway) return underway;
+        // Fall back to most recent session the student has data for
         const studentSessNames = new Set((found.sessionData||[]).map(sd => sd.session));
         const withData = sessions.filter(s => studentSessNames.has(s.name));
         return withData.length ? withData[withData.length - 1] : sessions[sessions.length - 1];
