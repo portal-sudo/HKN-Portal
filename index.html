@@ -6037,18 +6037,6 @@ function showPublicIntake() {
   intakeState = {};
   AppState.intakeScores = { speaking: 0, reading: 0, writing: 0 };
   showScreen('public-intake');
-  // Fetch Drive data using API key — no OAuth needed, file is shared "Anyone with link can view"
-  const fileId = DriveSync.fileId;
-  const apiKey = 'AIzaSyDHcgcbexdSEEbO6cd9SeTM3S4v0so9Rmw';
-  fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true&key=${apiKey}`)
-    .then(r => r.ok ? r.json() : Promise.reject('HTTP ' + r.status))
-    .then(data => {
-      if (data && Object.keys(data).length > 0) {
-        DB.restoreBackup(data);
-        console.log('Public intake: loaded', DB.getStudents().length, 'students from Drive');
-      }
-    })
-    .catch(e => console.warn('Public intake Drive fetch failed:', e));
 }
 
 function renderIntakeInfoView(student, currentSess) {
@@ -6178,73 +6166,71 @@ function intakeLookup() {
 function _intakeLookupCore() {
   const parentName  = document.getElementById('intake-parent-name').value.trim();
   const parentEmail = document.getElementById('intake-parent-email').value.trim().toLowerCase();
-  const studentName = document.getElementById('intake-student-name').value.trim().toLowerCase();
+  const studentName = document.getElementById('intake-student-name').value.trim();
   const studentDob  = document.getElementById('intake-student-dob').value.trim();
 
   if (!parentEmail || !studentName || !parentName || !studentDob) {
     showToast('Please fill in all four fields: parent name, email, student name, and date of birth', 'error'); return;
   }
 
-  // Helper: normalise a DOB string to YYYY-MM-DD for comparison
-  const normDob = d => {
-    if (!d) return '';
-    d = d.trim();
-    // Already YYYY-MM-DD (from HTML date input)
-    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
-    // MM/DD/YYYY or MM-DD-YYYY → YYYY-MM-DD
-    const m = d.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-    if (m) return m[3] + '-' + m[1].padStart(2,'0') + '-' + m[2].padStart(2,'0');
-    // Fallback: replace slashes only
-    return d.replace(/\//g, '-');
-  };
+  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw73sp2Oai5peGLo2RomRfUT__NAGlLive8uvm4X6N38A-57SSgD_SOk6i4p2rsazlq4Q/exec';
 
-  const all = DB.getStudents();
-  const found = all.find(s => {
-    const emailMatch  = (s.parentEmail || '').toLowerCase() === parentEmail;
-    const nameMatch   = s.firstName.toLowerCase().includes(studentName) ||
-                        studentName.includes(s.firstName.toLowerCase());
-    // Parent name: match any typed token against stored first or last name
-    const pTokens     = parentName.toLowerCase().split(/\s+/).filter(Boolean);
-    const pFirst      = (s.parentFirstName || '').toLowerCase();
-    const pLast       = (s.parentLastName  || '').toLowerCase();
-    const parentMatch = pTokens.some(t => pFirst.includes(t) || pLast.includes(t));
-    // DOB: always required
-    const dobMatch    = normDob(s.dob) === normDob(studentDob);
-    return emailMatch && nameMatch && parentMatch && dobMatch;
+  // Show a loading indicator while waiting for Apps Script
+  const btn = document.querySelector('#intake-step-1 .btn-primary');
+  const origText = btn.textContent;
+  btn.textContent = 'Looking up…';
+  btn.disabled = true;
+
+  fetch(APPS_SCRIPT_URL, {
+    method: 'POST',
+    body: JSON.stringify({ parentName, parentEmail, studentName, studentDob }),
+  })
+  .then(r => r.json())
+  .then(result => {
+    btn.textContent = origText;
+    btn.disabled = false;
+
+    if (result.error) {
+      showToast('Lookup error: ' + result.error, 'error'); return;
+    }
+
+    if (result.found) {
+      const found = result.student;
+      const eligible = ['Invited','In-Process','Active','Alumni'].includes(found.status);
+      if (!eligible) {
+        showToast(`Record found but status is "${found.status}". Please contact the school.`, 'warning'); return;
+      }
+      intakeState.student    = found;
+      intakeState.isNew      = false;
+      intakeState.isInterest = false;
+
+      const activeSess = SessionEngine.getActiveSession();
+      const openSess   = DB.getSessions().find(s => s.enrollmentOpen);
+      if (found.status === 'Active' && !openSess) {
+        renderIntakeInfoView(found, activeSess);
+        intakeGoStep('1c');
+        return;
+      }
+      renderIntakeBioForm(found, false);
+      intakeGoStep(2);
+
+    } else {
+      // Not found — offer interest registration
+      intakeState.isNew       = true;
+      intakeState.isInterest  = true;
+      intakeState.parentEmail = parentEmail;
+      intakeState.parentName  = parentName;
+      intakeState.studentName = studentName;
+      intakeState.studentDob  = studentDob;
+      intakeGoStep('1b');
+    }
+  })
+  .catch(err => {
+    btn.textContent = origText;
+    btn.disabled = false;
+    showToast('Could not reach lookup service. Please try again.', 'error');
+    console.warn('Apps Script lookup failed:', err.message);
   });
-
-  if (found) {
-    const eligible = ['Invited','In-Process','Active','Alumni'].includes(found.status);
-    if (!eligible) {
-      showToast(`Record found but status is "${found.status}". Please contact the school.`, 'warning');
-      return;
-    }
-    intakeState.student    = found;
-    intakeState.isNew      = false;
-    intakeState.isInterest = false;
-
-    // Active student, no open enrollment → show info view (read-only)
-    const activeSess = SessionEngine.getActiveSession();
-    const openSess   = DB.getSessions().find(s => s.enrollmentOpen);
-    if (found.status === 'Active' && !openSess) {
-      renderIntakeInfoView(found, activeSess);
-      intakeGoStep('1c');
-      return;
-    }
-
-    // For Invited / In-Process / Active (with open enroll) → full bio form
-    renderIntakeBioForm(found, false);
-    intakeGoStep(2);
-  } else {
-    // Not found — offer interest registration
-    intakeState.isNew       = true;
-    intakeState.isInterest  = true;
-    intakeState.parentEmail = parentEmail;
-    intakeState.parentName  = parentName;
-    intakeState.studentName = document.getElementById('intake-student-name').value.trim();
-    intakeState.studentDob  = studentDob;
-    intakeGoStep('1b');
-  }
 }
 
 function renderIntakeBioForm(student, isInterest) {
