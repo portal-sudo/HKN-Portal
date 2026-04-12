@@ -6182,6 +6182,9 @@ function _intakeLookupCore() {
       const enrollmentOpen = result.enrollmentOpen || false;
       const openSess       = enrollmentOpen ? { name: result.openSessName, fees: result.openSessFees, term: result.openSessTerm, enrollmentOpen: true } : null;
       console.log('enrollmentOpen:', enrollmentOpen, '| openSessName:', result.openSessName);
+      // Store session data and book prices in intakeState for use across all cases
+      intakeState.sessions   = result.sessions   || [];
+      intakeState.bookPrices = result.bookPrices  || {};
 
       // Helper: find the best session to show for Active students —
       // current underway session (today between first/last class) or most recently started
@@ -6276,7 +6279,34 @@ function renderIntakeNotYet(student) {
 }
 
 function renderIntakeInProcess(student, openSess) {
-  const firstName = student.firstName || 'your student';
+  const firstName  = student.firstName || 'your student';
+  const bookPrices = intakeState.bookPrices || {};
+  const sessions   = intakeState.sessions   || [];
+
+  // Get student's session data for the open session
+  const sd = openSess
+    ? (student.sessionData || []).find(d => d.session === openSess.name) || {}
+    : {};
+  const feesPaid  = sd.feesPaid  || false;
+  const bookLevel = sd.bookLevel || '';
+
+  // Find previous session to determine if book is new
+  let needsBook = false;
+  let bookCost  = 0;
+  if (bookLevel && openSess && sessions.length > 0) {
+    const openIdx  = sessions.findIndex(s => s.name === openSess.name);
+    const prevSess = openIdx > 0 ? sessions[openIdx - 1] : null;
+    const prevSd   = prevSess
+      ? (student.sessionData || []).find(d => d.session === prevSess.name)
+      : null;
+    const prevBook = prevSd ? (prevSd.bookLevel || '') : '';
+    needsBook = bookLevel !== prevBook;
+    bookCost  = needsBook ? (bookPrices[bookLevel] || 0) : 0;
+  }
+
+  const enrollFee  = openSess ? openSess.fees : 0;
+  const totalOwed  = enrollFee + bookCost;
+
   document.getElementById('intake-step-1c').innerHTML = `
     <div style="text-align:center; padding:10px 0 20px;">
       <div style="font-size:40px; margin-bottom:16px;">📋</div>
@@ -6284,14 +6314,39 @@ function renderIntakeInProcess(student, openSess) {
         Enrollment Received
       </div>
       <div style="font-size:14px; color:var(--ink-mid); line-height:1.7; margin-bottom:20px;">
-        Thank you — we have received <strong>${escHtml(firstName)}'s</strong> enrollment.
-        Confirmation is pending receipt of the enrollment fee.
+        Thank you — we have received <strong>${escHtml(firstName)}'s</strong> enrollment
+        ${openSess ? `for <strong>${escHtml(openSess.name)}</strong>` : ''}.
+        ${feesPaid
+          ? '<span style="color:var(--success); font-weight:600;">✓ Payment received — enrollment confirmed.</span>'
+          : 'Confirmation is pending receipt of the enrollment fee.'}
       </div>
-      <div style="background:var(--warning-light); border:1px solid rgba(192,120,0,0.25); border-radius:var(--radius-md); padding:16px 18px; font-size:13px; color:var(--ink-mid); line-height:1.7; margin-bottom:20px;">
-        <strong>Action required:</strong> If you haven't already done so, please send the enrollment fee via Zelle to
-        <strong>payments@hindikineev.org</strong>${openSess ? ` (${escHtml(openSess.name)} — $${openSess.fees})` : ''}.
-        Your enrollment will be confirmed once payment is received.
-      </div>
+      ${!feesPaid && openSess ? `
+        <div class="zelle-box" style="text-align:left; margin-bottom:20px;">
+          <div style="font-family:var(--serif); font-size:16px; font-weight:600; color:var(--orange-dark); margin-bottom:12px;">
+            Outstanding payment — ${escHtml(openSess.name)}
+          </div>
+          <div style="font-size:13px; color:var(--ink-mid);">
+            <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid rgba(0,0,0,0.08);">
+              <span>Enrollment fee</span><span><strong>$${enrollFee}</strong></span>
+            </div>
+            ${needsBook ? `
+              <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid rgba(0,0,0,0.08);">
+                <span>Book (${escHtml(bookLevel)})</span><span><strong>$${bookCost}</strong></span>
+              </div>
+            ` : ''}
+            <div style="display:flex; justify-content:space-between; padding:6px 0; font-weight:600; font-size:14px;">
+              <span>Total</span><span>$${totalOwed}</span>
+            </div>
+          </div>
+          <div class="zelle-amount">$${totalOwed}</div>
+          <div style="font-size:13px; color:var(--ink-mid); margin-top:8px;">
+            Send to: <strong>payments@hindikineev.org</strong>
+          </div>
+          <div style="font-size:12px; color:var(--orange-dark); margin-top:6px;">
+            Once we receive your payment, you'll receive a confirmation email.
+          </div>
+        </div>
+      ` : ''}
       <div style="background:var(--cream-mid); border-radius:var(--radius-md); padding:14px 18px; font-size:13px; color:var(--ink-mid); margin-bottom:24px;">
         Questions? Contact us at <a href="mailto:info@hindikineev.org" style="color:var(--orange);">info@hindikineev.org</a>
       </div>
