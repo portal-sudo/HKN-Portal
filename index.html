@@ -6179,7 +6179,7 @@ function _intakeLookupCore() {
     if (result.found) {
       const found          = result.student;
       const enrollmentOpen = result.enrollmentOpen || false;
-      const openSess       = enrollmentOpen ? { name: result.openSessName, fees: result.openSessFees, enrollmentOpen: true } : null;
+      const openSess       = enrollmentOpen ? { name: result.openSessName, fees: result.openSessFees, term: result.openSessTerm, enrollmentOpen: true } : null;
       console.log('enrollmentOpen:', enrollmentOpen, '| openSessName:', result.openSessName);
 
       // Helper: find the session to show for Active students —
@@ -6217,6 +6217,7 @@ function _intakeLookupCore() {
         intakeState.student    = found;
         intakeState.isNew      = false;
         intakeState.isInterest = false;
+        intakeState.openSess   = openSess;
         renderIntakeBioForm(found, false);
         intakeGoStep(2);
         return;
@@ -6503,7 +6504,7 @@ function intakeSaveBio() {
           ...(s.statusHistory || []),
           { status: 'In-Process', date: new Date().toISOString(), trigger: 'intake' }
         ];
-        const _openSess = DB.getSessions().find(function(se) { return se.enrollmentOpen; });
+        const _openSess = intakeState.openSess || DB.getSessions().find(function(se) { return se.enrollmentOpen; });
         if (_openSess) {
           const _now = new Date().toISOString();
           const _existingSd = (updated.sessionData || []).find(function(sd) { return sd.session === _openSess.name; });
@@ -6579,7 +6580,7 @@ function intakeSaveBio() {
           { status: 'In-Process', date: new Date().toISOString(), trigger: 'intake' }
         ];
         // Create session entry for the open enrollment session, stamped with enrollment start time
-        const _openSess = DB.getSessions().find(function(se) { return se.enrollmentOpen; });
+        const _openSess = intakeState.openSess || DB.getSessions().find(function(se) { return se.enrollmentOpen; });
         if (_openSess) {
           const _now = new Date().toISOString();
           const _existingSd = (updated.sessionData || []).find(function(sd) { return sd.session === _openSess.name; });
@@ -6625,22 +6626,21 @@ function intakeSaveBio() {
   DB.saveStudent(updated);
   intakeState.savedStudent = updated;
 
-  // For interest registrations: also save to Drive via Apps Script
-  // (public intake form has no logged-in user so DriveSync never fires)
-  if (intakeState.isInterest) {
+  // Save to Drive via Apps Script — needed for both interest registrations
+  // and Invited→In-Process enrollments (no logged-in user, DriveSync can't fire)
+  if (intakeState.isInterest || updated.status === 'In-Process') {
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyZfMMOkbTZmTGmO_Z0IEzsWs91FPRxk5kx1SvuGTthOAOCcOOPo4uXMVoie2a2iTcpYA/exec';
+    const action = intakeState.isInterest ? 'saveInterest' : 'saveEnrolled';
     fetch(APPS_SCRIPT_URL + '?t=' + Date.now(), {
       method: 'POST',
-      redirect: 'follow',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ action: 'saveInterest', student: updated }),
+      body: JSON.stringify({ action, student: updated }),
     })
     .then(r => r.json())
     .then(res => {
-      if (res.saved) console.log('Interest registration saved to Drive');
-      else console.warn('Interest save response:', res);
+      if (res.saved) console.log(action + ' saved to Drive');
+      else console.warn(action + ' save response:', res);
     })
-    .catch(err => console.warn('Interest save to Drive failed:', err.message));
+    .catch(err => console.warn(action + ' save to Drive failed:', err.message));
   }
 
   renderIntakeConfirmation(updated);
@@ -6648,7 +6648,7 @@ function intakeSaveBio() {
 }
 
 function renderIntakeConfirmation(student) {
-  const activeSess = SessionEngine.getActiveSession();
+  const activeSess = intakeState.openSess || SessionEngine.getActiveSession();
   const isInterest = intakeState.isInterest;
   const blocked    = intakeState.blockedByAssessment;
 
