@@ -6162,6 +6162,8 @@ function _intakeLookupCore() {
   btn.textContent = 'Looking up…';
   btn.disabled = true;
 
+  console.log('Sending to Apps Script:', JSON.stringify({ parentName, parentEmail, studentName, studentDob }));
+
   fetch(APPS_SCRIPT_URL, {
     method: 'POST',
     body: JSON.stringify({ parentName, parentEmail, studentName, studentDob }),
