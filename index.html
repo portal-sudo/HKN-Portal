@@ -6162,7 +6162,7 @@ function _intakeLookupCore() {
   btn.textContent = 'Looking up…';
   btn.disabled = true;
 
-  fetch(APPS_SCRIPT_URL + '?t=' + Date.now() + '&action=lookup', {
+  fetch(APPS_SCRIPT_URL + '?t=' + Date.now(), {
     method: 'POST',
     body: JSON.stringify({ parentName, parentEmail, studentName, studentDob }),
   })
