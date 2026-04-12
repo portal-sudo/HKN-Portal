@@ -697,7 +697,7 @@ const DB = {
 
   // STUDENTS
   getStudents()       { return Storage.get(KEYS.students) || []; },
-  saveStudents(arr)   { Storage.set(KEYS.students, arr); if (typeof DriveSync !== 'undefined' && typeof currentUser !== 'undefined' && currentUser?.role !== 'teacher') DriveSync.scheduleSave(); },
+  saveStudents(arr)   { Storage.set(KEYS.students, arr); if (typeof DriveSync !== 'undefined' && typeof currentUser !== 'undefined' && currentUser && currentUser.role !== 'teacher') DriveSync.scheduleSave(); },
   getStudent(id)      { return this.getStudents().find(s => s.id === id); },
 
   saveStudent(student) {
@@ -706,7 +706,7 @@ const DB = {
     if (idx >= 0) all[idx] = student;
     else all.push(student);
     Storage.set(KEYS.students, all);
-    if (typeof DriveSync !== 'undefined' && typeof currentUser !== 'undefined' && currentUser?.role !== 'teacher') DriveSync.scheduleSave();
+    if (typeof DriveSync !== 'undefined' && typeof currentUser !== 'undefined' && currentUser && currentUser.role !== 'teacher') DriveSync.scheduleSave();
     return student;
   },
 
@@ -749,7 +749,7 @@ const DB = {
     };
     return (Storage.get(KEYS.sessions) || []).slice().sort((a, b) => sortKey(a) - sortKey(b));
   },
-  saveSessions(arr)   { Storage.set(KEYS.sessions, arr); if (typeof DriveSync !== 'undefined' && typeof currentUser !== 'undefined' && currentUser?.role !== 'teacher') DriveSync.scheduleSave(); },
+  saveSessions(arr)   { Storage.set(KEYS.sessions, arr); if (typeof DriveSync !== 'undefined' && typeof currentUser !== 'undefined' && currentUser && currentUser.role !== 'teacher') DriveSync.scheduleSave(); },
   getSession(name)    { return this.getSessions().find(s => s.name === name); },
 
   saveSession(session) {
@@ -820,7 +820,7 @@ const DB = {
   getClassTimes()   { return Storage.get(KEYS.classTimes) || []; },
   getClassNames()   { return Storage.get(KEYS.classNames) || []; },
 
-  saveTeachers(arr)   { Storage.set(KEYS.teachers,   arr); if (typeof DriveSync !== 'undefined') DriveSync.scheduleSave(); },
+  saveTeachers(arr)   { Storage.set(KEYS.teachers,   arr); if (typeof DriveSync !== 'undefined' && currentUser) DriveSync.scheduleSave(); },
   saveClassLevels(arr){ Storage.set(KEYS.classLevels,  arr); },
   saveBookLevels(arr) { Storage.set(KEYS.bookLevels,  arr); },
 
@@ -855,7 +855,7 @@ const DB = {
 
   // SETTINGS
   getSettings()     { return Storage.get(KEYS.settings) || {}; },
-  saveSettings(obj) { Storage.set(KEYS.settings, obj); if (typeof DriveSync !== 'undefined') DriveSync.scheduleSave(); },
+  saveSettings(obj) { Storage.set(KEYS.settings, obj); if (typeof DriveSync !== 'undefined' && currentUser) DriveSync.scheduleSave(); },
 
   // EMAIL TEMPLATES
   getTemplates()        { return Storage.get(KEYS.templates) || []; },
