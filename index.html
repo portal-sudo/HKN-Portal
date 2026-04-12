@@ -2571,7 +2571,7 @@ function openStudentModal(studentId) {
             ${isAdmin ? `
               <div style="display:flex; gap:10px; margin-top:4px;">
                 <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
-                  <input type="radio" name="fees_${k}" value="1" ${sd.feesPaid?'checked':''} id="sf-feesPaid_1_${k}"/> Paid
+                  <input type="radio" name="fees_${k}" value="1" ${sd.feesPaid?'checked':''} id="sf-feesPaid_1_${k}" onchange="if(this.checked){const d=document.getElementById('sf-paymentDate_${k}');if(!d.value)d.value=new Date().toISOString().slice(0,10);}"/> Paid
                 </label>
                 <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
                   <input type="radio" name="fees_${k}" value="0" ${!sd.feesPaid?'checked':''}/> Pending
@@ -2977,8 +2977,8 @@ function saveStudentModal(existingId) {
     };
 
     const teacher = document.getElementById(`sf-teacher_${k}`)?.value || existing.teacher || '';
-    const hasExisting = !!existing.session; // existing.session is the session name string
-    if (!teacher && !hasExisting) return; // skip sessions with no prior entry at all
+    const hasExisting = !!existing.session;
+    if (!hasExisting && !teacher && !document.getElementById(`sf-classLevel_${k}`)?.value && !document.getElementById(`sf-feesPaid_1_${k}`)?.checked) return; // skip completely empty new entries
 
     const _feesPaid = gr(sess.name);
     const _wasFesPaid = existing.feesPaid || false;
@@ -2989,8 +2989,8 @@ function saveStudentModal(existingId) {
     updated.sessionData.push({
       session:       sess.name,
       teacher:       teacher,
-      classLevel:    document.getElementById(`sf-classLevel_${k}`)?.value || existing.classLevel || '',
-      bookLevel:     document.getElementById(`sf-bookLevel_${k}`)?.value || existing.bookLevel || '',
+      classLevel:    document.getElementById(`sf-classLevel_${k}`)?.value ?? existing.classLevel ?? '',
+      bookLevel:     document.getElementById(`sf-bookLevel_${k}`)?.value ?? existing.bookLevel ?? '',
       classTime:     document.getElementById(`sf-classTime_${k}`)?.value || existing.classTime || '',
       speakingScore: getSessScore('speaking'),
       readingScore:  getSessScore('reading'),
@@ -3034,6 +3034,21 @@ function saveStudentModal(existingId) {
           ...(updated.statusHistory || []),
           { status: 'Active', date: _activeDate, trigger: 'fees-verified' }
         ];
+        // Assign level and book now that fees are confirmed
+        if (!openSessData.classLevel) {
+          const _isFall    = openSess.term === 'Fall';
+          const _sessions  = DB.getSessions();
+          const _openIdx   = _sessions.findIndex(function(se) { return se.name === openSess.name; });
+          const _prevSess  = _openIdx > 0 ? _sessions[_openIdx - 1] : null;
+          const _prevSd    = _prevSess ? (updated.sessionData || []).find(function(sd) { return sd.session === _prevSess.name; }) : null;
+          const _prevLevel = _prevSd ? (_prevSd.classLevel || '') : '';
+          const _isFirst   = !_prevLevel;
+          const _newLevel  = _isFall ? (_isFirst ? 'Beg-1' : nextClassLevel(_prevLevel)) : _prevLevel;
+          const _prevBook  = _prevSd ? (_prevSd.bookLevel || '') : '';
+          const _newBook   = DB.bookForLevel(_newLevel) || '';
+          openSessData.classLevel = _newLevel;
+          openSessData.bookLevel  = (_isFall && (_isFirst || _newBook !== _prevBook)) ? _newBook : _prevBook || _newBook;
+        }
         // Stamp the session entry with Active promotion time
         const _sdIdx = updated.sessionData.findIndex(function(sd) { return sd.session === openSess.name; });
         if (_sdIdx >= 0) updated.sessionData[_sdIdx].statusDate = _activeDate;
@@ -6572,29 +6587,9 @@ function intakeSaveBio() {
           const _existingSd = (updated.sessionData || []).find(function(sd) { return sd.session === _openSess.name; });
           if (!_existingSd) {
             updated.sessionData = updated.sessionData || [];
-            // Determine promoted class level for Fall enrollment
-            const _isFall = _openSess.term === 'Fall';
-            const _prevSessions = DB.getSessions();
-            const _openIdx = _prevSessions.findIndex(function(se) { return se.name === _openSess.name; });
-            const _prevSess = _openIdx > 0 ? _prevSessions[_openIdx - 1] : null;
-            const _prevSd = _prevSess ? (updated.sessionData || []).find(function(sd) { return sd.session === _prevSess.name; }) : null;
-            const _prevLevel = _prevSd ? (_prevSd.classLevel || _prevSd.level || '') : '';
-            // New students start at Beg-1; returning students get promoted
-            const _isFirstTime = !_prevLevel;
-            const _newLevel = _isFall
-              ? (_isFirstTime ? 'Beg-1' : nextClassLevel(_prevLevel))
-              : _prevLevel;
-            // Determine book needed
-            const _prevBook  = _prevSd ? (_prevSd.bookLevel || '') : '';
-            const _newBook   = DB.bookForLevel(_newLevel) || '';
-            const _needsBook = _isFall && (_isFirstTime || _newBook !== _prevBook);
-            const _bookCost  = _needsBook && _newBook ? DB.priceForBook(_newBook) : 0;
-            // Store on intakeState for Zelle screen
-            intakeState.enrollLevel  = _newLevel;
-            intakeState.enrollBook   = _needsBook ? _newBook : '';
-            intakeState.enrollBookCost = _bookCost;
+            // Create blank session entry — level/book assigned when admin marks fees paid
             updated.sessionData.push({
-              session: _openSess.name, teacher: '', classLevel: _newLevel, bookLevel: _newBook,
+              session: _openSess.name, teacher: '', classLevel: '', bookLevel: '',
               className: '', classTime: '', speakingScore: 0, readingScore: 0, writingScore: 0,
               feesPaid: false, paymentDate: '', notes: '', attendance: {},
               statusDate: _now,
@@ -6641,39 +6636,18 @@ function intakeSaveBio() {
           ...(s.statusHistory || []),
           { status: 'In-Process', date: new Date().toISOString(), trigger: 'intake' }
         ];
-        // Create session entry for the open enrollment session, stamped with enrollment start time
+        // Create blank session entry — level/book assigned when admin marks fees paid
         const _openSess = intakeState.openSess || DB.getSessions().find(function(se) { return se.enrollmentOpen; });
         if (_openSess) {
           const _now = new Date().toISOString();
           const _existingSd = (updated.sessionData || []).find(function(sd) { return sd.session === _openSess.name; });
           if (!_existingSd) {
             updated.sessionData = updated.sessionData || [];
-            // Determine promoted class level for Fall enrollment
-            const _isFall = _openSess.term === 'Fall';
-            const _prevSessions = DB.getSessions();
-            const _openIdx = _prevSessions.findIndex(function(se) { return se.name === _openSess.name; });
-            const _prevSess = _openIdx > 0 ? _prevSessions[_openIdx - 1] : null;
-            const _prevSd = _prevSess ? (updated.sessionData || []).find(function(sd) { return sd.session === _prevSess.name; }) : null;
-            const _prevLevel = _prevSd ? (_prevSd.classLevel || _prevSd.level || '') : '';
-            // New students start at Beg-1; returning students get promoted
-            const _isFirstTime = !_prevLevel;
-            const _newLevel = _isFall
-              ? (_isFirstTime ? 'Beg-1' : nextClassLevel(_prevLevel))
-              : _prevLevel;
-            // Determine book needed
-            const _prevBook  = _prevSd ? (_prevSd.bookLevel || '') : '';
-            const _newBook   = DB.bookForLevel(_newLevel) || '';
-            const _needsBook = _isFall && (_isFirstTime || _newBook !== _prevBook);
-            const _bookCost  = _needsBook && _newBook ? DB.priceForBook(_newBook) : 0;
-            // Store on intakeState for Zelle screen
-            intakeState.enrollLevel  = _newLevel;
-            intakeState.enrollBook   = _needsBook ? _newBook : '';
-            intakeState.enrollBookCost = _bookCost;
             updated.sessionData.push({
-              session: _openSess.name, teacher: '', classLevel: _newLevel, bookLevel: _newBook,
+              session: _openSess.name, teacher: '', classLevel: '', bookLevel: '',
               className: '', classTime: '', speakingScore: 0, readingScore: 0, writingScore: 0,
               feesPaid: false, paymentDate: '', notes: '', attendance: {},
-              statusDate: _now,
+              statusDate: new Date().toISOString(),
             });
           }
         }
@@ -6687,7 +6661,6 @@ function intakeSaveBio() {
 
   DB.saveStudent(updated);
   intakeState.savedStudent = updated;
-  console.log('updated.status:', updated.status, '| isInterest:', intakeState.isInterest);
 
   // Save to Drive via Apps Script — needed for both interest registrations
   // and Invited→In-Process enrollments (no logged-in user, DriveSync can't fire)
@@ -6785,30 +6758,21 @@ function renderIntakeConfirmation(student) {
           <div style="font-family:var(--serif); font-size:18px; font-weight:600; color:var(--orange-dark); margin-bottom:8px;">
             To complete enrollment for ${activeSess.name}:
           </div>
-          ${intakeState.enrollLevel ? `
-            <div style="font-size:13px; color:var(--ink-mid); margin-bottom:10px;">
-              Your child will be enrolled in <strong>${escHtml(intakeState.enrollLevel)}</strong>.
-            </div>
-          ` : ''}
           <div style="font-size:13px; color:var(--ink-mid); margin-bottom:10px;">
             <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid rgba(0,0,0,0.08);">
               <span>Enrollment fee (${activeSess.name})</span><span><strong>$${activeSess.fees}</strong></span>
             </div>
-            ${intakeState.enrollBook ? `
-              <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid rgba(0,0,0,0.08);">
-                <span>Book (${escHtml(intakeState.enrollBook)})</span><span><strong>$${intakeState.enrollBookCost}</strong></span>
-              </div>
-              <div style="display:flex; justify-content:space-between; padding:6px 0; font-weight:600; font-size:14px;">
-                <span>Total</span><span>$${activeSess.fees + (intakeState.enrollBookCost || 0)}</span>
-              </div>
-            ` : ''}
+            <div style="display:flex; justify-content:space-between; padding:6px 0; font-weight:600; font-size:14px;">
+              <span>Total due now</span><span>$${activeSess.fees}</span>
+            </div>
           </div>
-          <div class="zelle-amount">$${activeSess.fees + (intakeState.enrollBookCost || 0)}</div>
+          <div class="zelle-amount">$${activeSess.fees}</div>
           <div style="font-size:13px; color:var(--ink-mid); margin-top:8px;">
             Send to: <strong>payments@hindikineev.org</strong>
           </div>
           <div style="font-size:12px; color:var(--orange-dark); margin-top:6px;">
             Once we receive your payment, you'll receive a confirmation email completing the enrollment.
+            Book fees (if applicable) will be communicated separately.
           </div>
         </div>
       ` : `
