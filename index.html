@@ -6168,7 +6168,6 @@ function _intakeLookupCore() {
   })
   .then(r => r.json())
   .then(result => {
-    console.log('Apps Script raw result:', JSON.stringify(result));
     btn.textContent = origText;
     btn.disabled = false;
 
@@ -6177,19 +6176,17 @@ function _intakeLookupCore() {
     }
 
     if (result.found) {
-      const found = result.student;
-      const openSess = DB.getSessions().find(s => s.enrollmentOpen);
+      const found    = result.student;
+      const openSess = result.openSess || null;
 
       // Helper: find the session to show for Active students —
       // current underway session (today between first/last class) or most recently started
       const getBestSession = () => {
-        const sessions = DB.getSessions();
+        const sessions = result.sessions || [];
         const today = new Date().toISOString().slice(0,10);
-        // Session currently underway
         const underway = sessions.find(s => s.firstClass && s.lastClass &&
           today >= s.firstClass && today <= s.lastClass);
         if (underway) return underway;
-        // Most recently started session that student has data for
         const studentSessNames = new Set((found.sessionData||[]).map(sd => sd.session));
         const withData = sessions.filter(s => studentSessNames.has(s.name));
         return withData.length ? withData[withData.length - 1] : sessions[sessions.length - 1];
@@ -6261,8 +6258,7 @@ function renderIntakeNotYet(student) {
         Enrollment Not Open Yet
       </div>
       <div style="font-size:14px; color:var(--ink-mid); line-height:1.7; margin-bottom:20px;">
-        We found <strong>${escHtml(firstName)}'s</strong> record — the school has marked them as invited
-        but enrollment for the upcoming session hasn't opened yet.<br><br>
+        Enrollment for the upcoming session hasn't opened yet.<br><br>
         Please check back soon. You'll be able to complete enrollment here once the school opens registration.
       </div>
       <div style="background:var(--cream-mid); border-radius:var(--radius-md); padding:14px 18px; font-size:13px; color:var(--ink-mid); margin-bottom:24px;">
