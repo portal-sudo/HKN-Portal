@@ -6154,15 +6154,13 @@ function _intakeLookupCore() {
     showToast('Please fill in all four fields: parent name, email, student name, and date of birth', 'error'); return;
   }
 
-  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw73sp2Oai5peGLo2RomRfUT__NAGlLive8uvm4X6N38A-57SSgD_SOk6i4p2rsazlq4Q/exec';
+  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyZfMMOkbTZmTGmO_Z0IEzsWs91FPRxk5kx1SvuGTthOAOCcOOPo4uXMVoie2a2iTcpYA/exec';
 
   // Show a loading indicator while waiting for Apps Script
   const btn = document.querySelector('#intake-step-1 .btn-primary');
   const origText = btn.textContent;
   btn.textContent = 'Looking up…';
   btn.disabled = true;
-
-  console.log('Sending to Apps Script:', JSON.stringify({ parentName, parentEmail, studentName, studentDob }));
 
   fetch(APPS_SCRIPT_URL, {
     method: 'POST',
@@ -6631,7 +6629,7 @@ function intakeSaveBio() {
   // For interest registrations: also save to Drive via Apps Script
   // (public intake form has no logged-in user so DriveSync never fires)
   if (intakeState.isInterest) {
-    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw73sp2Oai5peGLo2RomRfUT__NAGlLive8uvm4X6N38A-57SSgD_SOk6i4p2rsazlq4Q/exec';
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyZfMMOkbTZmTGmO_Z0IEzsWs91FPRxk5kx1SvuGTthOAOCcOOPo4uXMVoie2a2iTcpYA/exec';
     fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       body: JSON.stringify({ action: 'saveInterest', student: updated }),
