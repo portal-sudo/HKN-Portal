@@ -6257,65 +6257,66 @@ function renderIntakeBioForm(student, isInterest) {
   if (isInterest) {
     // ── Full form for new interest registrations ──────────────
     document.getElementById('intake-bio-form').innerHTML = `
+      <div style="font-size:11px; color:var(--ink-light); margin-bottom:12px;"><span style="color:var(--danger);">*</span> Required fields</div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
         <div class="form-group">
-          <label class="form-label">Student first name</label>
+          <label class="form-label">Student first name <span style="color:var(--danger);">*</span></label>
           <input type="text" class="form-input" id="ib-firstName" value="${escHtml(s.firstName || studentNameParts[0] || '')}"/>
         </div>
         <div class="form-group">
-          <label class="form-label">Student last name</label>
+          <label class="form-label">Student last name <span style="color:var(--danger);">*</span></label>
           <input type="text" class="form-input" id="ib-lastName" value="${escHtml(s.lastName || studentNameParts.slice(1).join(' ') || '')}"/>
         </div>
       </div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
         <div class="form-group">
-          <label class="form-label">Parent first name</label>
+          <label class="form-label">Parent first name <span style="color:var(--danger);">*</span></label>
           <input type="text" class="form-input" id="ib-parentFirstName" value="${escHtml(s.parentFirstName || nameParts[0] || '')}"/>
         </div>
         <div class="form-group">
-          <label class="form-label">Parent last name</label>
+          <label class="form-label">Parent last name <span style="color:var(--danger);">*</span></label>
           <input type="text" class="form-input" id="ib-parentLastName" value="${escHtml(s.parentLastName || nameParts.slice(1).join(' ') || '')}"/>
         </div>
       </div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
         <div class="form-group">
-          <label class="form-label">Parent email</label>
+          <label class="form-label">Parent email <span style="color:var(--danger);">*</span></label>
           <input type="email" class="form-input" id="ib-parentEmail" value="${escHtml(s.parentEmail || intakeState.parentEmail || '')}"/>
         </div>
         <div class="form-group">
-          <label class="form-label">Date of birth</label>
+          <label class="form-label">Date of birth <span style="color:var(--danger);">*</span></label>
           <input type="date" class="form-input" id="ib-dob" value="${escHtml(s.dob || intakeState.studentDob || '')}"/>
         </div>
       </div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
         <div class="form-group">
-          <label class="form-label">Grade entering Fall ${(new Date().getMonth() >= 8 ? new Date().getFullYear() + 1 : new Date().getFullYear())}</label>
+          <label class="form-label">Grade entering Fall ${(new Date().getMonth() >= 8 ? new Date().getFullYear() + 1 : new Date().getFullYear())} <span style="color:var(--danger);">*</span></label>
           <input type="text" class="form-input" id="ib-grade" value="${escHtml(s.grade||'')}" placeholder="e.g. K, 1, 2, 3…"/>
         </div>
         <div class="form-group"></div>
       </div>
       <div class="form-group" style="margin-bottom:12px;">
-        <label class="form-label">Home address</label>
-        <input type="text" class="form-input" id="ib-address" value="${escHtml(s.address||'')}"/>
+        <label class="form-label">Home address <span style="color:var(--danger);">*</span></label>
+        <input type="text" class="form-input" id="ib-address" value="${escHtml(s.address||'')}" placeholder="e.g. 123 Main St, Springfield, CA 94000"/>
       </div>
       <div class="form-group" style="margin-bottom:12px;">
-        <label class="form-label">Phone number</label>
+        <label class="form-label">Phone number <span style="color:var(--danger);">*</span></label>
         <input type="tel" class="form-input" id="ib-phone" value="${escHtml(s.phone||'')}"/>
       </div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
         <div class="form-group">
-          <label class="form-label">Alt. contact name</label>
+          <label class="form-label">Alt. contact name <span style="font-size:10px; color:var(--ink-light); font-weight:400;">(optional)</span></label>
           <input type="text" class="form-input" id="ib-altName" value="${escHtml((s.altContactFirstName||'') + ' ' + (s.altContactLastName||''))}"/>
         </div>
         <div class="form-group">
-          <label class="form-label">Alt. contact email</label>
+          <label class="form-label">Alt. contact email <span style="font-size:10px; color:var(--ink-light); font-weight:400;">(optional)</span></label>
           <input type="email" class="form-input" id="ib-altEmail" value="${escHtml(s.altContactEmail||'')}"/>
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label">Tell us about your child's Hindi background</label>
+        <label class="form-label">Tell us about your child's Hindi background <span style="color:var(--danger);">*</span></label>
         <textarea class="form-textarea" id="ib-notes" rows="4" placeholder="e.g. Speaks some Hindi at home, can read basic Devanagari, no prior formal instruction…"></textarea>
-        <div style="font-size:11px; color:var(--ink-light); margin-top:4px;">The school will follow up to assess your child's level before placement.</div>
+        <div style="font-size:11px; color:var(--ink-light); margin-top:4px;">Required — the school will use this to assess your child's level before placement.</div>
       </div>
     `;
   } else {
@@ -6367,6 +6368,45 @@ function intakeSaveBio() {
   const s = intakeState.student || { id: 'std_' + Date.now(), sessionData: [] };
   const altName = (document.getElementById('ib-altName')?.value || '').split(' ');
   const isReturning = !intakeState.isInterest && !intakeState.isNew;
+
+  // ── Validation for interest registrations ───────────────────
+  if (intakeState.isInterest) {
+    const required = [
+      { id: 'ib-firstName',     label: 'Student first name' },
+      { id: 'ib-lastName',      label: 'Student last name' },
+      { id: 'ib-parentFirstName', label: 'Parent first name' },
+      { id: 'ib-parentLastName',  label: 'Parent last name' },
+      { id: 'ib-parentEmail',   label: 'Parent email' },
+      { id: 'ib-dob',           label: 'Date of birth' },
+      { id: 'ib-grade',         label: 'Grade' },
+      { id: 'ib-address',       label: 'Home address' },
+      { id: 'ib-phone',         label: 'Phone number' },
+      { id: 'ib-notes',         label: 'Hindi background' },
+    ];
+    for (const f of required) {
+      if (!(document.getElementById(f.id)?.value || '').trim()) {
+        showToast(`Please fill in: ${f.label}`, 'error');
+        document.getElementById(f.id)?.focus();
+        return;
+      }
+    }
+    // Address format: must have a street number, some text, and a city/state or zip
+    const address = (document.getElementById('ib-address').value || '').trim();
+    const addressOk = /^\d+\s+\S+.{5,},\s*\S+.{1,},?\s*(CA|[A-Z]{2})\s*\d{5}/i.test(address) ||
+                      /^\d+\s+.{5,},\s*.{2,},\s*.{2,}/.test(address);
+    if (!addressOk) {
+      showToast('Please enter a complete address including street number, street name, city and state — e.g. 123 Main St, Springfield, CA 94000', 'error');
+      document.getElementById('ib-address')?.focus();
+      return;
+    }
+    // Notes must have meaningful content (at least 20 chars)
+    const notes = (document.getElementById('ib-notes').value || '').trim();
+    if (notes.length < 20) {
+      showToast('Please describe your child\'s Hindi background in a little more detail', 'error');
+      document.getElementById('ib-notes')?.focus();
+      return;
+    }
+  }
 
   let updated;
 
@@ -6513,6 +6553,23 @@ function intakeSaveBio() {
 
   DB.saveStudent(updated);
   intakeState.savedStudent = updated;
+
+  // For interest registrations: also save to Drive via Apps Script
+  // (public intake form has no logged-in user so DriveSync never fires)
+  if (intakeState.isInterest) {
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw73sp2Oai5peGLo2RomRfUT__NAGlLive8uvm4X6N38A-57SSgD_SOk6i4p2rsazlq4Q/exec';
+    fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'saveInterest', student: updated }),
+    })
+    .then(r => r.json())
+    .then(res => {
+      if (res.saved) console.log('Interest registration saved to Drive');
+      else console.warn('Interest save response:', res);
+    })
+    .catch(err => console.warn('Interest save to Drive failed:', err.message));
+  }
+
   renderIntakeConfirmation(updated);
   intakeGoStep(3);
 }
