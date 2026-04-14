@@ -663,6 +663,7 @@ const Storage = {
   get(key)      { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } },
   set(key, val) { localStorage.setItem(key, JSON.stringify(val)); },
   remove(key)   { localStorage.removeItem(key); },
+  clear()       { Object.values(KEYS).forEach(k => localStorage.removeItem(k)); },
 };
 
 // ── SESSION ENGINE ───────────────────────────────────────────
@@ -1721,11 +1722,41 @@ async function manualSync() {
 
 function doLogout() {
   currentUser = null;
+  Storage.clear();
+  _clearInactivityTimer();
   showScreen('login');
 }
 function backToLogin() {
   currentUser = null;
+  Storage.clear();
+  _clearInactivityTimer();
   showScreen('login');
+}
+
+// ── INACTIVITY AUTO-LOGOUT ────────────────────────────────────
+const INACTIVITY_MS = 45 * 60 * 1000; // 45 minutes
+let _inactivityTimer = null;
+
+function _resetInactivityTimer() {
+  clearTimeout(_inactivityTimer);
+  _inactivityTimer = setTimeout(() => {
+    if (currentUser) {
+      showToast('You have been signed out due to inactivity', 'info');
+      doLogout();
+    }
+  }, INACTIVITY_MS);
+}
+
+function _clearInactivityTimer() {
+  clearTimeout(_inactivityTimer);
+  _inactivityTimer = null;
+}
+
+function _startInactivityTimer() {
+  _resetInactivityTimer();
+  ['mousemove','keydown','click','touchstart','scroll'].forEach(evt =>
+    document.addEventListener(evt, _resetInactivityTimer, { passive: true })
+  );
 }
 
 // ── APP SHELL ────────────────────────────────────────────────
@@ -1747,6 +1778,7 @@ function loadAppShell() {
   DriveSync.load().then(() => {
     seedAttributesIfEmpty();
     navigateTo(currentUser.role === 'teacher' ? 'attendance' : 'dashboard');
+    _startInactivityTimer();
   });
 }
 
@@ -3623,6 +3655,11 @@ function renderClassCards() {
         : {};
       const classLevel   = firstSd.classLevel || '';
       const classBookLvl = firstSd.bookLevel  || '';
+      // Expand abbreviated level to full name for display
+      const fullLevelName = classLevel.replace(
+        /^(Beg|Int|Adv)-(\d+)$/,
+        (_, t, n) => ({ Beg: 'Beginner', Int: 'Intermediate', Adv: 'Advanced' }[t] + ' — Year ' + n)
+      );
 
       const roster = cls.students
         .slice()
@@ -3644,7 +3681,7 @@ function renderClassCards() {
             <div style="font-size:16px;font-weight:600;color:var(--olive);">${escHtml(cls.teacher)}</div>
             <div style="font-size:12px;color:var(--ink-light);margin-top:2px;">
               🕐 ${escHtml(cls.classTime)}
-              ${classLevel ? ` &nbsp;·&nbsp; <span style="color:var(--ink-mid);">${escHtml(classLevel)}</span>` : ''}
+              ${classLevel ? ` &nbsp;·&nbsp; <span style="color:var(--ink-mid);">${escHtml(fullLevelName)}</span>` : ''}
               ${classBookLvl ? ` &nbsp;·&nbsp; <span style="color:var(--ink-mid);">${escHtml(classBookLvl)}</span>` : ''}
             </div>
           </div>
@@ -6406,7 +6443,6 @@ function _intakeLookupCore() {
   })
   .then(r => r.json())
   .then(result => {
-    console.log('FULL result:', JSON.stringify(result));
     btn.textContent = origText;
     btn.disabled = false;
 
@@ -6418,8 +6454,6 @@ function _intakeLookupCore() {
       const found          = result.student;
       const enrollmentOpen = result.enrollmentOpen || false;
       const openSess       = enrollmentOpen ? { name: result.openSessName, fees: result.openSessFees, term: result.openSessTerm, enrollmentOpen: true } : null;
-      console.log('enrollmentOpen:', enrollmentOpen, '| openSessName:', result.openSessName);
-      // Store session data and book prices in intakeState for use across all cases
       intakeState.sessions   = result.sessions   || [];
       intakeState.bookPrices = result.bookPrices  || {};
 
