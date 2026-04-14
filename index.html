@@ -1684,12 +1684,10 @@ async function doGoogleLogin() {
       if (!email.endsWith('@hindikineev.org')) {
         showErr('Teacher access requires a @hindikineev.org Google account.'); return;
       }
-      const teacher = DB.findTeacher(email.split('@')[0]) ||
-                      DB.getTeachers().find(t => (t.email || '').toLowerCase() === email);
-      if (!teacher) {
-        showErr('This email (' + email + ') is not registered as a teacher. Please contact the admin.'); return;
-      }
-      currentUser = { email, role: 'teacher', name: DB.teacherDisplay(teacher) };
+      // Set provisional user and load Drive data first, then validate teacher exists
+      currentUser = { email, role: 'teacher', name: email.split('@')[0] };
+      loadAppShell(true); // true = validate teacher after load
+      return;
 
     } else if (role === 'viewer') {
       if (!email.endsWith('@hindikineev.org')) {
@@ -1766,7 +1764,7 @@ function _startInactivityTimer() {
 }
 
 // ── APP SHELL ────────────────────────────────────────────────
-function loadAppShell() {
+function loadAppShell(validateTeacher = false) {
   showScreen('app');
   const sess = SessionEngine.getActiveSession() || SessionEngine.getCurrentSession();
   document.getElementById('current-session-badge').textContent = sess?.name || '';
@@ -1783,6 +1781,23 @@ function loadAppShell() {
   // Load data from Google Drive, then navigate
   DriveSync.load().then(() => {
     seedAttributesIfEmpty();
+    // Validate teacher exists after Drive data is loaded
+    if (validateTeacher && currentUser?.role === 'teacher') {
+      const email = currentUser.email;
+      const teacher = DB.findTeacher(email.split('@')[0]) ||
+                      DB.getTeachers().find(t => (t.email || '').toLowerCase() === email);
+      if (!teacher) {
+        currentUser = null;
+        Storage.clear();
+        showScreen('login');
+        document.getElementById('login-error').textContent = 'This email (' + email + ') is not registered as a teacher. Please contact the admin.';
+        document.getElementById('login-error').style.display = 'block';
+        return;
+      }
+      // Update name from teacher record now that we have it
+      currentUser.name = DB.teacherDisplay(teacher);
+      document.getElementById('nav-user-email').textContent = currentUser.email;
+    }
     navigateTo(currentUser.role === 'teacher' ? 'attendance' : 'dashboard');
     _startInactivityTimer();
   });
@@ -5842,14 +5857,16 @@ function openSaveTemplateDialog() {
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="saveTemplate('${escAttr(subject)}','${escAttr(body)}')">Save template</button>
+        <button class="btn btn-primary" onclick="saveTemplate()">Save template</button>
       </div>
     </div>`;
   showModal(html);
 }
 
-function saveTemplate(subject, body) {
-  const name = document.getElementById('tmpl-name')?.value.trim();
+function saveTemplate() {
+  const name    = document.getElementById('tmpl-name')?.value.trim();
+  const subject = document.getElementById('email-subject')?.value.trim() || '';
+  const body    = document.getElementById('email-body')?.value.trim() || '';
   if (!name) { showToast('Please enter a template name', 'error'); return; }
   const tmpl = {
     id:        'tmpl_' + Date.now(),
