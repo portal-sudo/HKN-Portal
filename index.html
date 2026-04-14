@@ -1824,6 +1824,7 @@ function renderDashboard() {
   const activeSess = SessionEngine.getActiveSession();
   const allStudents = DB.getStudents();
   const feesPending = allStudents.filter(s => {
+    if (!['In-Process', 'Active'].includes(s.status)) return false;
     const sd = (s.sessionData||[]).find(d => d.session === activeSess?.name);
     return sd && !sd.feesPaid;
   }).length;
@@ -1965,7 +1966,15 @@ function filterByStatus(status) {
 }
 
 function filterByFeePending() {
+  const activeSess = SessionEngine.getActiveSession();
+  // Navigate to directory filtered to In-Process status (students with pending fees)
+  currentStudentFilter = { status: 'In-Process', session: activeSess?.name || '' };
   navigateTo('directory');
+  setTimeout(() => {
+    const statusSel = document.getElementById('filter-status');
+    if (statusSel) statusSel.value = 'In-Process';
+    renderStudentTable();
+  }, 50);
 }
 
 function openInviteReturningDialog() {
