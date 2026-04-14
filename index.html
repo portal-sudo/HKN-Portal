@@ -689,15 +689,18 @@ const SessionEngine = {
     return sessions.find(s => s.name === cur.name) || sessions[sessions.length - 1];
   },
   getUnderwaySession() {
-    // Returns the session currently being taught (today between first and last class date),
-    // falling back to the most recently started session. Never returns a future-only session.
+    // Returns the session currently being taught (today within its classDates range),
+    // falling back to the most recently started session.
     const sessions = DB.getSessions();
     const today = new Date().toISOString().slice(0,10);
-    const underway = sessions.find(s => s.firstClass && s.lastClass &&
-      today >= s.firstClass && today <= s.lastClass);
+    const underway = sessions.find(s => {
+      const dates = s.classDates || [];
+      if (!dates.length) return false;
+      return today >= dates[0] && today <= dates[dates.length - 1];
+    });
     if (underway) return underway;
     // Fall back to most recent session that has already started
-    const started = sessions.filter(s => s.firstClass && s.firstClass <= today);
+    const started = sessions.filter(s => (s.classDates||[]).length && s.classDates[0] <= today);
     return started.length ? started[started.length - 1] : sessions[sessions.length - 1];
   },
   buildSessionName(term, year) { return `${term}-${year}`; },
@@ -6233,10 +6236,11 @@ function _intakeLookupCore() {
       const getBestSession = () => {
         const sessions = result.sessions || [];
         const today = new Date().toISOString().slice(0,10);
-        const underway = sessions.find(s => s.firstClass && s.lastClass &&
-          today >= s.firstClass && today <= s.lastClass);
+        const underway = sessions.find(s => {
+          const dates = s.classDates || [];
+          return dates.length && today >= dates[0] && today <= dates[dates.length - 1];
+        });
         if (underway) return underway;
-        // Fall back to most recent session the student has data for
         const studentSessNames = new Set((found.sessionData||[]).map(sd => sd.session));
         const withData = sessions.filter(s => studentSessNames.has(s.name));
         return withData.length ? withData[withData.length - 1] : sessions[sessions.length - 1];
