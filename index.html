@@ -6439,7 +6439,6 @@ function _intakeLookupCore() {
   fetch(APPS_SCRIPT_URL + '?payload=' + lookupPayload)
   .then(r => r.json())
   .then(result => {
-    console.log('Lookup result:', result.found, result.student?.status);
     btn.textContent = origText;
     btn.disabled = false;
 
@@ -6505,7 +6504,8 @@ function _intakeLookupCore() {
       }
 
       // ── Case 5: Dropped / Alumni / other ─────────────────────
-      showToast(`Your student record was found but has status "${found.status}". Please contact the school at info@hindikineev.org.`, 'warning');
+      renderIntakeContactSchool(found);
+      intakeGoStep('1c');
 
     } else {
       // Not found — offer interest registration
@@ -6525,6 +6525,28 @@ function _intakeLookupCore() {
     showToast('Could not reach lookup service. Please try again.', 'error');
     console.warn('Apps Script lookup failed:', err.message);
   });
+}
+
+function renderIntakeContactSchool(student) {
+  const firstName = student.firstName || 'your student';
+  document.getElementById('intake-step-1c').innerHTML = `
+    <div style="text-align:center; padding:10px 0 20px;">
+      <div style="font-size:40px; margin-bottom:16px;">🏫</div>
+      <div style="font-size:20px; font-weight:600; color:var(--olive-dark); margin-bottom:10px;">
+        Please Contact the School
+      </div>
+      <div style="font-size:14px; color:var(--ink-mid); line-height:1.7; margin-bottom:20px;">
+        We found a record for <strong>${escHtml(firstName)}</strong> but their current status
+        (<strong>${escHtml(student.status)}</strong>) means we are unable to process
+        enrollment through this form.
+      </div>
+      <div style="background:var(--cream-mid); border-radius:var(--radius-md); padding:14px 18px; font-size:13px; color:var(--ink-mid); margin-bottom:24px;">
+        Please contact us at <a href="mailto:info@hindikineev.org" style="color:var(--orange);">info@hindikineev.org</a>
+        and we will be happy to assist you.
+      </div>
+      <a href="#" onclick="backToLogin()" style="font-size:13px; color:var(--orange);">← Back to portal</a>
+    </div>
+  `;
 }
 
 function renderIntakeNotYet(student) {
