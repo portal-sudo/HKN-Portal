@@ -730,7 +730,7 @@ const DB = {
   },
 
   deleteStudentsByStatus(status) {
-    if (status === 'ALL') { Storage.set(KEYS.students, []); return; }
+    if (status === 'ALL') { Storage.set(KEYS.students, []); if (typeof DriveSync !== 'undefined' && currentUser) DriveSync.scheduleSave(); return; }
     this.saveStudents(this.getStudents().filter(s => s.status !== status));
   },
 
@@ -842,16 +842,16 @@ const DB = {
   getClassNames()   { return Storage.get(KEYS.classNames) || []; },
 
   saveTeachers(arr)   { Storage.set(KEYS.teachers,   arr); if (typeof DriveSync !== 'undefined' && currentUser) DriveSync.scheduleSave(); },
-  saveClassLevels(arr){ Storage.set(KEYS.classLevels,  arr); },
-  saveBookLevels(arr) { Storage.set(KEYS.bookLevels,  arr); },
+  saveClassLevels(arr){ Storage.set(KEYS.classLevels,  arr); if (typeof DriveSync !== 'undefined' && currentUser) DriveSync.scheduleSave(); },
+  saveBookLevels(arr) { Storage.set(KEYS.bookLevels,  arr);  if (typeof DriveSync !== 'undefined' && currentUser) DriveSync.scheduleSave(); },
 
   // Book prices: { 'Book 1': 20, 'Book 2': 20, ... }
   getBookPrices()      { return Storage.get(KEYS.bookPrices)   || {}; },
-  saveBookPrices(obj)  { Storage.set(KEYS.bookPrices, obj); },
+  saveBookPrices(obj)  { Storage.set(KEYS.bookPrices, obj);   if (typeof DriveSync !== 'undefined' && currentUser) DriveSync.scheduleSave(); },
 
   // Level->Book mapping: { 'Beg-1': 'Book 1', 'Beg-2': 'Book 2', ... }
   getLevelBookMap()    { return Storage.get(KEYS.levelBookMap) || {}; },
-  saveLevelBookMap(obj){ Storage.set(KEYS.levelBookMap, obj); },
+  saveLevelBookMap(obj){ Storage.set(KEYS.levelBookMap, obj); if (typeof DriveSync !== 'undefined' && currentUser) DriveSync.scheduleSave(); },
 
   // Helper: get book number for a class level
   bookForLevel(level) {
@@ -863,8 +863,8 @@ const DB = {
     const prices = this.getBookPrices();
     return prices[book] || 0;
   },
-  saveClassTimes(arr) { Storage.set(KEYS.classTimes,  arr); },
-  saveClassNames(arr) { Storage.set(KEYS.classNames,  arr); },
+  saveClassTimes(arr) { Storage.set(KEYS.classTimes,  arr); if (typeof DriveSync !== 'undefined' && currentUser) DriveSync.scheduleSave(); },
+  saveClassNames(arr) { Storage.set(KEYS.classNames,  arr); if (typeof DriveSync !== 'undefined' && currentUser) DriveSync.scheduleSave(); },
 
   addItem(listKey, val) {
     const list = Storage.get(listKey) || [];
@@ -880,7 +880,7 @@ const DB = {
 
   // EMAIL TEMPLATES
   getTemplates()        { return Storage.get(KEYS.templates) || []; },
-  saveTemplates(arr)    { Storage.set(KEYS.templates, arr); },
+  saveTemplates(arr)    { Storage.set(KEYS.templates, arr); if (typeof DriveSync !== 'undefined' && currentUser) DriveSync.scheduleSave(); },
   getTemplate(id)       { return this.getTemplates().find(t => t.id === id); },
   saveTemplate(tmpl) {
     const all = this.getTemplates();
@@ -1725,10 +1725,22 @@ async function manualSync() {
 }
 
 function doLogout() {
-  currentUser = null;
-  Storage.clear();
-  _clearInactivityTimer();
-  showScreen('login');
+  // Force immediate save of any pending changes before clearing
+  if (typeof DriveSync !== 'undefined' && DriveSync.syncTimer) {
+    clearTimeout(DriveSync.syncTimer);
+    DriveSync.syncTimer = null;
+    DriveSync.save().finally(() => {
+      currentUser = null;
+      Storage.clear();
+      _clearInactivityTimer();
+      showScreen('login');
+    });
+  } else {
+    currentUser = null;
+    Storage.clear();
+    _clearInactivityTimer();
+    showScreen('login');
+  }
 }
 function backToLogin() {
   currentUser = null;
@@ -1784,8 +1796,11 @@ function loadAppShell(validateTeacher = false) {
     // Validate teacher exists after Drive data is loaded
     if (validateTeacher && currentUser?.role === 'teacher') {
       const email = currentUser.email;
+      const teachers = DB.getTeachers();
+      console.log('Teacher validation: found', teachers.length, 'teachers in DB');
       const teacher = DB.findTeacher(email.split('@')[0]) ||
-                      DB.getTeachers().find(t => (t.email || '').toLowerCase() === email);
+                      teachers.find(t => (t.email || '').toLowerCase() === email);
+      console.log('Teacher match:', teacher);
       if (!teacher) {
         currentUser = null;
         Storage.clear();
