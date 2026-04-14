@@ -2476,6 +2476,9 @@ function renderStudentTable() {
     const sd = (sdExact.teacher || sdExact.classLevel)
       ? sdExact
       : (s.sessionData||[]).slice().reverse().find(d => d.teacher || d.classLevel) || sdExact;
+    const feesCell = isAdmin
+      ? `<td>${sd.feesPaid ? '<span class="badge badge-green">Paid</span>' : (sd.session ? '<span class="badge badge-red">Pending</span>' : '—')}</td>`
+      : '';
     return `
       <tr style="cursor:pointer;" onclick="openStudentModal('${s.id}')">
         <td style="font-family:var(--serif); font-size:12px; color:var(--ink-light);">${s.studentId || '—'}</td>
@@ -2488,7 +2491,7 @@ function renderStudentTable() {
         <td>${sd.speakingScore !== undefined ? scoreBar(sd.speakingScore) : '—'}</td>
         <td>${sd.readingScore  !== undefined ? scoreBar(sd.readingScore)  : '—'}</td>
         <td>${sd.writingScore  !== undefined ? scoreBar(sd.writingScore)  : '—'}</td>
-        ${isAdmin ? `<td>${sd.feesPaid ? '<span class="badge badge-green">Paid</span>' : (sd.session ? '<span class="badge badge-red">Pending</span>' : '—')}</td>` : ''}
+        ${feesCell}
         <td onclick="event.stopPropagation();">
 
         </td>
