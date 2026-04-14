@@ -2425,7 +2425,7 @@ function renderStudentTable() {
   let students = DB.searchStudents({ name, session, status, teacher, classLevel });
 
   // Sort
-  const activeSessForSort = SessionEngine.getActiveSession();
+  const activeSessForSort = SessionEngine.getUnderwaySession();
   const sesKeySort = session || activeSessForSort?.name || '';
   const dir = currentSort.dir === 'asc' ? 1 : -1;
   students = students.slice().sort((a, b) => {
@@ -2439,7 +2439,7 @@ function renderStudentTable() {
       case 'session': va = sdA.session||''; vb = sdB.session||''; break;
       case 'teacher': va = (sdA.teacher||'').toLowerCase(); vb = (sdB.teacher||'').toLowerCase(); break;
       case 'level':   va = (sdA.classLevel||'').toLowerCase(); vb = (sdB.classLevel||'').toLowerCase(); break;
-      case 'fees':    va = sdA.feesPaid?'1':'0'; vb = sdB.feesPaid?'1':'0'; break;
+      case 'date':    va = a.timestamp||''; vb = b.timestamp||''; break;
       default:        va = ''; vb = '';
     }
     return va < vb ? -dir : va > vb ? dir : 0;
@@ -2447,53 +2447,87 @@ function renderStudentTable() {
 
   document.getElementById('student-count').textContent = `Showing ${students.length} student${students.length !== 1 ? 's' : ''}`;
 
-  // Render sortable headers
+  // ── Column mode based on status filter ───────────────────────
+  const isInterest   = status === 'Interest';
+  const isInvited    = status === 'Invited';
+  const isInProcess  = status === 'In-Process';
+  const isActive     = status === 'Active';
+  const isDateMode   = isInterest || isInvited || isInProcess;
+  const showScores   = isActive;
+  const showSession  = !isDateMode;
+  const showTeacher  = !isDateMode;
+  const showLevel    = !isDateMode;
+
+  const dateColLabel = isInterest ? 'Interest since' : isInvited ? 'Invited since' : 'Enrolled since';
+
   const thStyle = 'cursor:pointer; user-select:none; white-space:nowrap;';
   const arrow = (col) => currentSort.col === col ? (currentSort.dir === 'asc' ? ' ▲' : ' ▼') : ' ⬍';
   const th = (col, label) => `<th style="${thStyle}" onclick="setSort('${col}')">${label}${arrow(col)}</th>`;
-  const activeSess = SessionEngine.getActiveSession();
-  const isAdmin = currentUser.role === 'admin';
+  const thPlain = (label) => `<th style="white-space:nowrap;">${label}</th>`;
+
+  const activeSess = SessionEngine.getUnderwaySession();
+
   const thead = document.getElementById('dir-thead-row');
   if (thead) thead.innerHTML =
     th('id','ID') + th('name','Student name') + th('parent','Parent') + th('status','Status') +
-    th('session','Session') + th('teacher','Teacher') + th('level','Level') +
-    '<th>Speak</th><th>Read</th><th>Write</th>' + (isAdmin ? th('fees','Fees') : '') + '<th></th>';
+    (isDateMode  ? th('date', dateColLabel) : '') +
+    (showSession ? th('session','Session') : '') +
+    (showTeacher ? th('teacher','Teacher') : '') +
+    (showLevel   ? th('level','Level')   : '') +
+    (showScores  ? '<th>Speak</th><th>Read</th><th>Write</th>' : '') +
+    '<th></th>';
 
   const tbody = document.getElementById('student-tbody');
   if (!tbody) return;
 
+  const colCount = 5 + (isDateMode ? 1 : 0) + (showSession ? 1 : 0) + (showTeacher ? 1 : 0) +
+                   (showLevel ? 1 : 0) + (showScores ? 3 : 0) + 1;
+
   if (students.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:32px; color:var(--ink-light);">No students match your filters</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${colCount}" style="text-align:center; padding:32px; color:var(--ink-light);">No students match your filters</td></tr>`;
     return;
   }
 
   tbody.innerHTML = students.map(s => {
     const sesKey = session || activeSess?.name || '';
-    // For teacher/level display: use sesKey session data if it has a teacher,
-    // otherwise fall back to most recent session with a teacher assigned
     const sdExact = (s.sessionData||[]).find(d => d.session === sesKey) || {};
     const sd = (sdExact.teacher || sdExact.classLevel)
       ? sdExact
       : (s.sessionData||[]).slice().reverse().find(d => d.teacher || d.classLevel) || sdExact;
-    const feesCell = isAdmin
-      ? `<td>${sd.feesPaid ? '<span class="badge badge-green">Paid</span>' : (sd.session ? '<span class="badge badge-red">Pending</span>' : '—')}</td>`
+
+    // Date cell — Interest since, Invited since, or Enrolled since
+    let dateCell = '';
+    if (isInterest) {
+      const d = s.timestamp ? new Date(s.timestamp).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—';
+      dateCell = `<td style="font-size:12px; color:var(--ink-light);">${d}</td>`;
+    } else if (isInvited) {
+      const inviteEntry = (s.statusHistory || []).slice().reverse().find(h => h.status === 'Invited');
+      const d = inviteEntry ? new Date(inviteEntry.date).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—';
+      dateCell = `<td style="font-size:12px; color:var(--ink-light);">${d}</td>`;
+    } else if (isInProcess) {
+      // Use statusDate from the most recent sessionData entry (enrollment submission stamp)
+      const inProcessSd = (s.sessionData || []).slice().reverse().find(sd => sd.statusDate);
+      const d = inProcessSd?.statusDate ? new Date(inProcessSd.statusDate).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—';
+      dateCell = `<td style="font-size:12px; color:var(--ink-light);">${d}</td>`;
+    }
+
+    const sessionCell  = showSession ? `<td style="font-size:12px;">${sd.session || '—'}</td>` : '';
+    const teacherCell  = showTeacher ? `<td style="font-size:12px;">${sd.teacher || '—'}</td>` : '';
+    const levelCell    = showLevel   ? `<td style="font-size:12px;">${sd.classLevel || '—'}</td>` : '';
+    const scoreCells   = showScores
+      ? `<td>${sd.speakingScore !== undefined ? scoreBar(sd.speakingScore) : '—'}</td>
+         <td>${sd.readingScore  !== undefined ? scoreBar(sd.readingScore)  : '—'}</td>
+         <td>${sd.writingScore  !== undefined ? scoreBar(sd.writingScore)  : '—'}</td>`
       : '';
+
     return `
       <tr style="cursor:pointer;" onclick="openStudentModal('${s.id}')">
         <td style="font-family:var(--serif); font-size:12px; color:var(--ink-light);">${s.studentId || '—'}</td>
         <td style="font-weight:500;">${s.firstName} ${s.lastName}</td>
         <td style="color:var(--ink-light);">${s.parentFirstName} ${s.parentLastName}</td>
         <td><span class="badge badge-${(s.status||'').toLowerCase().replace('-','').replace(' ','')}">${s.status}</span></td>
-        <td style="font-size:12px;">${sd.session || '—'}</td>
-        <td style="font-size:12px;">${sd.teacher || '—'}</td>
-        <td style="font-size:12px;">${sd.classLevel || '—'}</td>
-        <td>${sd.speakingScore !== undefined ? scoreBar(sd.speakingScore) : '—'}</td>
-        <td>${sd.readingScore  !== undefined ? scoreBar(sd.readingScore)  : '—'}</td>
-        <td>${sd.writingScore  !== undefined ? scoreBar(sd.writingScore)  : '—'}</td>
-        ${feesCell}
-        <td onclick="event.stopPropagation();">
-
-        </td>
+        ${dateCell}${sessionCell}${teacherCell}${levelCell}${scoreCells}
+        <td onclick="event.stopPropagation();"></td>
       </tr>
     `;
   }).join('');
