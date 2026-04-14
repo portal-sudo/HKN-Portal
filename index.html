@@ -6435,10 +6435,8 @@ function _intakeLookupCore() {
   btn.textContent = 'Looking up…';
   btn.disabled = true;
 
-  fetch(APPS_SCRIPT_URL, {
-    method: 'POST',
-    body: JSON.stringify({ parentName, parentEmail, studentName, studentDob }),
-  })
+  const lookupPayload = encodeURIComponent(JSON.stringify({ action: 'lookup', parentName, parentEmail, studentName, studentDob }));
+  fetch(APPS_SCRIPT_URL + '?payload=' + lookupPayload)
   .then(r => r.json())
   .then(result => {
     console.log('Lookup result:', result.found, result.student?.status);
