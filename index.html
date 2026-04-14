@@ -1727,22 +1727,10 @@ async function manualSync() {
 }
 
 function doLogout() {
-  // Force immediate save of any pending changes before clearing
-  if (typeof DriveSync !== 'undefined' && DriveSync.syncTimer) {
-    clearTimeout(DriveSync.syncTimer);
-    DriveSync.syncTimer = null;
-    DriveSync.save().finally(() => {
-      currentUser = null;
-      Storage.clear();
-      _clearInactivityTimer();
-      showScreen('login');
-    });
-  } else {
-    currentUser = null;
-    Storage.clear();
-    _clearInactivityTimer();
-    showScreen('login');
-  }
+  currentUser = null;
+  Storage.clear();
+  _clearInactivityTimer();
+  showScreen('login');
 }
 function backToLogin() {
   currentUser = null;
