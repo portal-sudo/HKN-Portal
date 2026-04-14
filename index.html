@@ -791,6 +791,12 @@ const DB = {
     else sess.refunds.push(refund);
     this.saveSession(sess);
   },
+  deleteRefund(sessName, studentId) {
+    const sess = this.getSession(sessName);
+    if (!sess || !sess.refunds) return;
+    sess.refunds = sess.refunds.filter(r => r.studentId !== studentId);
+    this.saveSession(sess);
+  },
 
   // CLASS NOTES — stored per session as { "Teacher|ClassTime": "notes text" }
   getClassNotes(sessName) {
@@ -3412,7 +3418,9 @@ function renderFeesTable() {
         '<td style="font-size:12px;color:var(--ink-light);">' + detail + '</td>' +
         '<td>' + (!isRefunded && currentUser.role === 'admin'
           ? '<button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--danger);" onclick="openRefundDialog(\'' + s.id + '\',\'' + sessName + '\')">↩ Refund</button>'
-          : '') + '</td>' +
+          : (isRefunded && currentUser.role === 'admin'
+            ? '<button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--ink-light);" onclick="deleteRefundConfirm(\'' + s.id + '\',\'' + sessName + '\')">🗑 Remove</button>'
+            : '')) + '</td>' +
       '</tr>';
   });
 
@@ -3561,6 +3569,20 @@ function confirmRefund() {
   closeModal();
   renderFeesTable();
   showToast('Refund recorded — ' + s.firstName + ' ' + s.lastName + ' marked as Dropped', 'success');
+}
+
+function deleteRefundConfirm(studentId, sessName) {
+  const s = DB.getStudent(studentId);
+  const name = s ? s.firstName + ' ' + s.lastName : 'this student';
+  showConfirm('🗑', 'Remove refund record',
+    `Remove the refund record for <strong>${escHtml(name)}</strong> from <strong>${escHtml(sessName)}</strong>?<br><br>This only removes the refund entry — it does not change the student\'s status.`,
+    'Remove refund', 'btn-danger',
+    () => {
+      DB.deleteRefund(sessName, studentId);
+      renderFeesTable();
+      showToast('Refund record removed', 'success');
+    }
+  );
 }
 
 function feeToggleAll(checked) {
