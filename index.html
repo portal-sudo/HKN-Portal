@@ -688,6 +688,18 @@ const SessionEngine = {
     const cur = this.getCurrentSession();
     return sessions.find(s => s.name === cur.name) || sessions[sessions.length - 1];
   },
+  getUnderwaySession() {
+    // Returns the session currently being taught (today between first and last class date),
+    // falling back to the most recently started session. Never returns a future-only session.
+    const sessions = DB.getSessions();
+    const today = new Date().toISOString().slice(0,10);
+    const underway = sessions.find(s => s.firstClass && s.lastClass &&
+      today >= s.firstClass && today <= s.lastClass);
+    if (underway) return underway;
+    // Fall back to most recent session that has already started
+    const started = sessions.filter(s => s.firstClass && s.firstClass <= today);
+    return started.length ? started[started.length - 1] : sessions[sessions.length - 1];
+  },
   buildSessionName(term, year) { return `${term}-${year}`; },
 };
 
@@ -2502,7 +2514,7 @@ function openStudentModal(studentId) {
   const classLevels = DB.getClassLevels();
   const bookLevels = DB.getBookLevels();
   const classTimes = DB.getClassTimes();
-  const activeSess = SessionEngine.getActiveSession();
+  const activeSess = SessionEngine.getUnderwaySession();
 
   const s = student || { status:'Interest', sessionData:[] };
   const sessionData = s.sessionData || [];
@@ -2536,7 +2548,7 @@ function openStudentModal(studentId) {
     const sessObj = DB.getSession(sess.name) || sess;
     sess.classDates = sessObj.classDates || sess.classDates || [];
     const k = sess.name.replace(/[^a-z0-9]/gi, '_'); // sanitized key — must match saveStudentModal
-    const isCurrentSess = activeSess?.name === sess.name;
+    const isCurrentSess = SessionEngine.getUnderwaySession()?.name === sess.name;
     // Teacher can ONLY edit scores + notes for their OWN students in current session
     const isOwnStudent   = currentUser.role === 'teacher' &&
       (sd.teacher || '').toLowerCase().includes(currentUser.name.split(' ')[0].toLowerCase());
@@ -5695,7 +5707,7 @@ function renderAttendance() {
   const sessions  = DB.getSessions();
   const teachers  = DB.getTeachers();
   const isAdmin   = currentUser.role === 'admin';
-  const activeSess = SessionEngine.getActiveSession();
+  const activeSess = SessionEngine.getUnderwaySession();
 
   const html = `
     <div class="page-header">
