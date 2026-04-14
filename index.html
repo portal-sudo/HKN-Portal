@@ -2451,6 +2451,8 @@ function renderStudentTable() {
   const thStyle = 'cursor:pointer; user-select:none; white-space:nowrap;';
   const arrow = (col) => currentSort.col === col ? (currentSort.dir === 'asc' ? ' ▲' : ' ▼') : ' ⬍';
   const th = (col, label) => `<th style="${thStyle}" onclick="setSort('${col}')">${label}${arrow(col)}</th>`;
+  const activeSess = SessionEngine.getActiveSession();
+  const isAdmin = currentUser.role === 'admin';
   const thead = document.getElementById('dir-thead-row');
   if (thead) thead.innerHTML =
     th('id','ID') + th('name','Student name') + th('parent','Parent') + th('status','Status') +
@@ -2459,9 +2461,6 @@ function renderStudentTable() {
 
   const tbody = document.getElementById('student-tbody');
   if (!tbody) return;
-
-  const activeSess = SessionEngine.getActiveSession();
-  const isAdmin = currentUser.role === 'admin';
 
   if (students.length === 0) {
     tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:32px; color:var(--ink-light);">No students match your filters</td></tr>`;
