@@ -1765,6 +1765,7 @@ function buildSidebar() {
     ...(isAdmin ? [{ id:'attendance', icon:'📝', label:'Mark attendance' }] : []),
     { id:'sessions', icon:'📅', label:'Sessions' },
     { id:'classes',  icon:'🏫', label:'Classes' },
+    { id:'scoring-guide', icon:'📖', label:'Scoring guide' },
     ...(isAdmin ? [{ id:'fees', icon:'💰', label:'Fees tracker' }] : []),
     ...(isAdmin ? [
       { id:'attributes', icon:'⚙️', label:'School attributes' },
@@ -1804,6 +1805,7 @@ function navigateTo(page) {
     'add-student': () => { renderDirectory(); openStudentModal(null); },
     sessions:    renderSessions,
     classes:     renderClasses,
+    'scoring-guide': renderScoringGuide,
     attributes:  renderAttributes,
     import:      renderImport,
     backup:      renderBackup,
@@ -3704,6 +3706,151 @@ function saveClassNote(sessName, teacher, classTime) {
     DriveSync.teacherSave();
   }
   showToast('Notes saved', 'success');
+}
+
+// ── SCORING GUIDE ─────────────────────────────────────────────
+const SCORING_GUIDE_DOC_ID = '1OXYP4GH7EyVQci0mDIv-dNykOmsHn0fnNDFGp25a0p0';
+let _scoringGuideCache = null; // { levelCode: htmlString }
+
+async function renderScoringGuide() {
+  const classLevels = DB.getClassLevels();
+  document.getElementById('content-area').innerHTML = `
+    <div class="page-header">
+      <div class="page-title">Scoring Guide</div>
+      <div class="page-subtitle">Select a class level to view the scoring criteria</div>
+    </div>
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+        <div class="form-group" style="min-width:180px; margin:0;">
+          <label class="form-label">Class level</label>
+          <select class="form-select" id="sg-level-select" onchange="loadScoringGuideSection()">
+            <option value="">— Select a level —</option>
+            ${classLevels.map(l => `<option value="${l}">${l}</option>`).join('')}
+          </select>
+        </div>
+        <div id="sg-status" style="font-size:13px; color:var(--ink-light); margin-top:18px;"></div>
+      </div>
+    </div>
+    <div id="sg-content"></div>
+  `;
+
+  // Pre-load the guide in the background
+  if (!_scoringGuideCache) {
+    document.getElementById('sg-status').textContent = 'Loading scoring guide…';
+    await _fetchScoringGuide();
+  }
+  document.getElementById('sg-status').textContent = _scoringGuideCache ? '' : '⚠️ Could not load scoring guide';
+}
+
+async function _fetchScoringGuide() {
+  try {
+    const token = await DriveSync.getToken();
+    if (!token) throw new Error('No auth token');
+    const resp = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${SCORING_GUIDE_DOC_ID}/export?mimeType=text/html`,
+      { headers: { Authorization: 'Bearer ' + token } }
+    );
+    if (!resp.ok) throw new Error('Drive export failed: ' + resp.status);
+    const html = await resp.text();
+    _scoringGuideCache = _parseScoringGuide(html);
+  } catch(err) {
+    console.warn('Scoring guide fetch failed:', err.message);
+    _scoringGuideCache = null;
+  }
+}
+
+function _parseScoringGuide(html) {
+  // Google Docs exports headings as <h1>, <h2> etc. with the heading text inside
+  // We split on <h2> tags since that's what we used for level headings
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+
+  // Remove Google's default styles — we'll apply our own
+  doc.querySelectorAll('style, link[rel="stylesheet"]').forEach(el => el.remove());
+
+  // Find all h2 elements — these are the level headings (Beg-1, Beg-2 etc.)
+  const headings = Array.from(doc.querySelectorAll('h2'));
+  const guide = {};
+
+  headings.forEach((h2, idx) => {
+    const levelCode = h2.textContent.trim();
+    if (!levelCode) return;
+
+    // Collect all sibling nodes between this h2 and the next h2
+    const sectionNodes = [];
+    let node = h2.nextSibling;
+    const nextH2 = headings[idx + 1];
+    while (node && node !== nextH2) {
+      sectionNodes.push(node.cloneNode(true));
+      node = node.nextSibling;
+    }
+
+    // Build section HTML
+    const wrapper = document.createElement('div');
+    sectionNodes.forEach(n => wrapper.appendChild(n));
+    guide[levelCode] = wrapper.innerHTML;
+  });
+
+  return guide;
+}
+
+function loadScoringGuideSection() {
+  const level = document.getElementById('sg-level-select')?.value;
+  const container = document.getElementById('sg-content');
+  if (!level) { container.innerHTML = ''; return; }
+
+  if (!_scoringGuideCache) {
+    container.innerHTML = `<div style="color:var(--ink-light); padding:20px 0; font-size:13px;">⚠️ Scoring guide could not be loaded. Please check your connection and try again.</div>`;
+    return;
+  }
+
+  const sectionHtml = _scoringGuideCache[level];
+  if (!sectionHtml) {
+    container.innerHTML = `<div style="color:var(--ink-light); padding:20px 0; font-size:13px;">No scoring guide found for ${level}. Please check the Google Doc has a Heading 2 named exactly "${level}".</div>`;
+    return;
+  }
+
+  // Render in a styled card
+  container.innerHTML = `
+    <div class="card">
+      <div style="font-family:var(--serif); font-size:22px; font-weight:600; color:var(--olive); margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid var(--olive-mid);">
+        ${level}
+      </div>
+      <div id="sg-section-body" style="font-size:14px; line-height:1.8; color:var(--ink);">
+        ${sectionHtml}
+      </div>
+    </div>
+  `;
+
+  // Apply basic styling to Google Doc exported elements
+  const body = document.getElementById('sg-section-body');
+  if (body) {
+    // Tables
+    body.querySelectorAll('table').forEach(t => {
+      t.style.borderCollapse = 'collapse';
+      t.style.width = '100%';
+      t.style.marginBottom = '16px';
+    });
+    body.querySelectorAll('td, th').forEach(td => {
+      td.style.border = '1px solid var(--olive-mid)';
+      td.style.padding = '6px 10px';
+      td.style.fontSize = '13px';
+    });
+    body.querySelectorAll('th').forEach(th => {
+      th.style.background = 'var(--olive-pale)';
+      th.style.fontWeight = '600';
+    });
+    // Remove Google's inline font/color styles that might clash
+    body.querySelectorAll('[style]').forEach(el => {
+      const keep = ['font-weight','font-style','text-decoration'];
+      const style = el.getAttribute('style') || '';
+      const filtered = style.split(';')
+        .filter(s => keep.some(k => s.trim().startsWith(k)))
+        .join(';');
+      if (filtered) el.setAttribute('style', filtered);
+      else el.removeAttribute('style');
+    });
+  }
 }
 
 function renderSessions() {
