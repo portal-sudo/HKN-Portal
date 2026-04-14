@@ -5887,18 +5887,33 @@ function saveTemplate() {
 
 function renderTemplates() {
   const templates = DB.getTemplates();
-  const placeholders = ['{{studentFirstName}}','{{studentLastName}}','{{parentFirstName}}','{{sessionName}}','{{fees}}','{{studentId}}','{{classTime}}','{{teacher}}'];
+  const isAdmin = currentUser.role === 'admin';
+
+  const rows = templates.map(t => {
+    const date = t.createdAt ? new Date(t.createdAt).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—';
+    return `<tr>
+      <td style="font-weight:500; font-size:13px;">${escHtml(t.name)}</td>
+      <td style="font-size:13px; color:var(--ink-mid);">${escHtml(t.subject || '(no subject)')}</td>
+      <td style="font-size:12px; color:var(--ink-light); max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml((t.body||'').replace(/\n/g,' ').slice(0,100))}${(t.body||'').length>100?'…':''}</td>
+      <td style="font-size:12px; color:var(--ink-light); white-space:nowrap;">${date}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-ghost btn-sm" onclick="navigateTo('email');setTimeout(()=>loadTemplateById('${t.id}'),100)">📧 Use</button>
+        ${isAdmin ? `
+          <button class="btn btn-ghost btn-sm" onclick="openEditTemplateEditor('${t.id}')">✏️ Edit</button>
+          <button class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="deleteTemplateConfirm('${t.id}')">🗑️</button>
+        ` : ''}
+      </td>
+    </tr>`;
+  }).join('');
 
   const html = `
     <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start;">
       <div>
         <div class="page-title">Email templates</div>
-        <div class="page-subtitle">Create reusable templates with MailMerge placeholders</div>
+        <div class="page-subtitle">Saved templates for reuse in Send email</div>
       </div>
       ${isAdmin ? `<button class="btn btn-primary" onclick="openNewTemplateEditor()">➕ New template</button>` : ''}
     </div>
-
-    <div id="template-editor-area"></div>
 
     ${templates.length === 0 ? `
       <div class="card" style="text-align:center; padding:40px; color:var(--ink-light);">
@@ -5907,29 +5922,29 @@ function renderTemplates() {
         <div style="font-size:13px;">${isAdmin ? 'Click "New template" to create your first reusable email.' : 'No templates have been created yet. Ask your admin to set some up.'}</div>
       </div>
     ` : `
-      <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(320px,1fr)); gap:14px;">
-        ${templates.map(t => `
-          <div class="card">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
-              <div style="font-family:var(--serif); font-size:17px; font-weight:600; color:var(--olive);">${escHtml(t.name)}</div>
-              ${isAdmin ? `<div style="display:flex; gap:6px;">
-                <button class="btn btn-secondary btn-sm" onclick="openEditTemplateEditor('${t.id}')">✏️ Edit</button>
-                <button class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="deleteTemplateConfirm('${t.id}')">🗑️</button>
-              </div>` : ''}
-            </div>
-            <div style="font-size:12px; font-weight:600; color:var(--ink-light); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:3px;">Subject</div>
-            <div style="font-size:13px; color:var(--ink-mid); margin-bottom:10px;">${escHtml(t.subject || '(no subject)')}</div>
-            <div style="font-size:12px; font-weight:600; color:var(--ink-light); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:3px;">Preview</div>
-            <div style="font-size:12px; color:var(--ink-light); white-space:pre-wrap; max-height:60px; overflow:hidden; background:var(--olive-pale); border-radius:var(--radius-sm); padding:8px 10px;">${escHtml((t.body||'').slice(0,150))}${(t.body||'').length>150?'…':''}</div>
-            <div style="font-size:11px; color:var(--ink-light); margin-top:8px;">
-              Created ${new Date(t.createdAt).toLocaleDateString()} by ${escHtml(t.createdBy || 'admin')}
-            </div>
-          </div>
-        `).join('')}
+      <div class="card" style="padding:0;">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Name</th><th>Subject</th><th>Preview</th><th>Created</th><th></th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
       </div>
     `}
   `;
   document.getElementById('content-area').innerHTML = html;
+}
+
+function loadTemplateById(id) {
+  const t = DB.getTemplate(id);
+  if (!t) return;
+  const subj = document.getElementById('email-subject');
+  const body = document.getElementById('email-body');
+  if (subj) subj.value = t.subject || '';
+  if (body) body.value = t.body || '';
+  showToast(`Template "${t.name}" loaded`, 'success');
 }
 
 function openNewTemplateEditor() {
