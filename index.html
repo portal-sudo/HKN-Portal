@@ -1793,7 +1793,7 @@ function navigateTo(page) {
   document.querySelectorAll('.sidebar-item').forEach(b => b.classList.remove('active'));
   document.getElementById(`nav-${page}`)?.classList.add('active');
   // Default directory filters to Active status + current session
-  const _currSess = (SessionEngine.getActiveSession() || DB.getSessions().slice(-1)[0])?.name || '';
+  const _currSess = (SessionEngine.getUnderwaySession() || DB.getSessions().slice(-1)[0])?.name || '';
   currentStudentFilter = (page === 'directory' || page === 'add-student')
     ? { status: 'Active', session: _currSess }
     : {};
