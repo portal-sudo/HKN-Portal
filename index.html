@@ -2455,7 +2455,7 @@ function renderStudentTable() {
   if (thead) thead.innerHTML =
     th('id','ID') + th('name','Student name') + th('parent','Parent') + th('status','Status') +
     th('session','Session') + th('teacher','Teacher') + th('level','Level') +
-    '<th>Speak</th><th>Read</th><th>Write</th>' + th('fees','Fees') + '<th></th>';
+    '<th>Speak</th><th>Read</th><th>Write</th>' + (isAdmin ? th('fees','Fees') : '') + '<th></th>';
 
   const tbody = document.getElementById('student-tbody');
   if (!tbody) return;
@@ -2488,7 +2488,7 @@ function renderStudentTable() {
         <td>${sd.speakingScore !== undefined ? scoreBar(sd.speakingScore) : '—'}</td>
         <td>${sd.readingScore  !== undefined ? scoreBar(sd.readingScore)  : '—'}</td>
         <td>${sd.writingScore  !== undefined ? scoreBar(sd.writingScore)  : '—'}</td>
-        <td>${sd.feesPaid ? '<span class="badge badge-green">Paid</span>' : (sd.session ? '<span class="badge badge-red">Pending</span>' : '—')}</td>
+        ${isAdmin ? `<td>${sd.feesPaid ? '<span class="badge badge-green">Paid</span>' : (sd.session ? '<span class="badge badge-red">Pending</span>' : '—')}</td>` : ''}
         <td onclick="event.stopPropagation();">
 
         </td>
