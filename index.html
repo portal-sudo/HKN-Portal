@@ -967,6 +967,7 @@ const DB = {
       classTimes:  this.getClassTimes(),
       classNames:  this.getClassNames(),
       settings:    this.getSettings(),
+      templates:   this.getTemplates(),
     };
   },
 
@@ -982,6 +983,7 @@ const DB = {
     if (d.classTimes)  Storage.set(KEYS.classTimes,  d.classTimes);
     if (d.classNames)  Storage.set(KEYS.classNames,  d.classNames);
     if (d.settings)    Storage.set(KEYS.settings,    d.settings);
+    if (d.templates)   Storage.set(KEYS.templates,   d.templates);
   },
 
   importJSON(json) {
@@ -5110,10 +5112,8 @@ const DriveSync = {
   // ── Save localStorage data to Drive (debounced) ──
   scheduleSave() {
     if (this.syncTimer) clearTimeout(this.syncTimer);
-    // Check role at execution time (not schedule time) to ensure currentUser is set
     this.syncTimer = setTimeout(() => {
       const isTeacher = (typeof currentUser !== 'undefined') && currentUser?.role === 'teacher';
-      console.log('DriveSync: scheduleSave firing, role:', currentUser?.role);
       if (isTeacher) this.teacherSave(); else this.save();
     }, 3000);
   },
