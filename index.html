@@ -6441,6 +6441,7 @@ function _intakeLookupCore() {
   })
   .then(r => r.json())
   .then(result => {
+    console.log('Lookup result:', result.found, result.student?.status);
     btn.textContent = origText;
     btn.disabled = false;
 
