@@ -143,7 +143,7 @@ a:hover { text-decoration: underline; }
 .badge-inprocess { background: #FEF9C3; color: #854D0E; }
 .badge-active    { background: var(--success-light); color: var(--success); }
 .badge-alumni    { background: var(--olive-pale); color: var(--olive); }
-.badge-graduated { background: #F0FDF4; color: #166534; }
+.badge-graduated { background: #166534; color: #F0FDF4; font-variant: small-caps; }
 .badge-other     { background: #F3F4F6; color: #374151; }
 .badge-dropped   { background: #F3F4F6; color: #374151; }
 .badge-orange    { background: var(--orange-light); color: var(--orange-dark); }
@@ -3870,6 +3870,13 @@ async function renderScoringGuide() {
     await _fetchScoringGuide();
   }
   document.getElementById('sg-status').textContent = _scoringGuideCache ? '' : '⚠️ Could not load scoring guide';
+
+  // Default to Beg-1
+  const sel = document.getElementById('sg-level-select');
+  if (sel && classLevels.includes('Beg-1')) {
+    sel.value = 'Beg-1';
+    loadScoringGuideSection();
+  }
 }
 
 async function _fetchScoringGuide() {
