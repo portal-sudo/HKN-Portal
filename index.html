@@ -1727,14 +1727,17 @@ async function manualSync() {
 }
 
 function doLogout() {
+  // Cancel any pending DriveSync save on logout
+  if (typeof DriveSync !== 'undefined' && DriveSync.syncTimer) {
+    clearTimeout(DriveSync.syncTimer);
+    DriveSync.syncTimer = null;
+  }
   currentUser = null;
-  Storage.clear();
   _clearInactivityTimer();
   showScreen('login');
 }
 function backToLogin() {
   currentUser = null;
-  Storage.clear();
   _clearInactivityTimer();
   showScreen('login');
 }
