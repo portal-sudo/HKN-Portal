@@ -5365,14 +5365,20 @@ const GMAIL = {
     // Build RFC 2822 message, base64url-encode it
   buildRawMessage({ to, subject, body, fromName, fromEmail }) {
     const nl = '\r\n';
+    // Convert plain text body to basic HTML — preserves line breaks and allows hyperlinks
+    const htmlBody = body
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\n/g, '<br>');
     const msg = [
       `From: ${fromName} <${fromEmail}>`,
       `To: ${to}`,
       `Subject: ${subject}`,
-      `Content-Type: text/plain; charset=UTF-8`,
+      `Content-Type: text/html; charset=UTF-8`,
       `MIME-Version: 1.0`,
       ``,
-      body,
+      `<html><body style="font-family:sans-serif;font-size:14px;line-height:1.6;">${htmlBody}</body></html>`,
     ].join(nl);
     return btoa(unescape(encodeURIComponent(msg)))
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
