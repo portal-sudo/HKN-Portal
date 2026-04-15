@@ -1796,7 +1796,6 @@ function loadAppShell(validateTeacher = false) {
       console.log('Teacher match:', teacher);
       if (!teacher) {
         currentUser = null;
-        Storage.clear();
         showScreen('login');
         document.getElementById('login-error').textContent = 'This email (' + email + ') is not registered as a teacher. Please contact the admin.';
         document.getElementById('login-error').style.display = 'block';
