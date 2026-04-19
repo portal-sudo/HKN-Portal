@@ -6482,14 +6482,21 @@ function renderIntakeInfoView(student, currentSess) {
 
   document.getElementById('intake-info-view').innerHTML = `
     <div class="card" style="margin-bottom:14px;">
-      <div style="display:flex; align-items:center; gap:16px; margin-bottom:20px;">
-        <div style="width:56px; height:56px; border-radius:50%; background:var(--olive); display:flex; align-items:center; justify-content:center; font-family:var(--serif); font-size:22px; color:var(--cream); font-weight:600; flex-shrink:0;">
-          ${escHtml(student.firstName.charAt(0))}${escHtml(student.lastName.charAt(0))}
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:20px;">
+        <div style="display:flex; align-items:center; gap:16px;">
+          <div style="width:56px; height:56px; border-radius:50%; background:var(--olive); display:flex; align-items:center; justify-content:center; font-family:var(--serif); font-size:22px; color:var(--cream); font-weight:600; flex-shrink:0;">
+            ${escHtml(student.firstName.charAt(0))}${escHtml(student.lastName.charAt(0))}
+          </div>
+          <div>
+            <div style="font-family:var(--serif); font-size:24px; font-weight:600; color:var(--olive);">${escHtml(student.firstName)} ${escHtml(student.lastName)}</div>
+            <div style="font-size:13px; color:var(--ink-light); margin-top:2px;">Student ID: ${escHtml(student.studentId || 'Pending')} · <span style="color:var(--success); font-weight:600;">Active</span></div>
+          </div>
         </div>
-        <div>
-          <div style="font-family:var(--serif); font-size:24px; font-weight:600; color:var(--olive);">${escHtml(student.firstName)} ${escHtml(student.lastName)}</div>
-          <div style="font-size:13px; color:var(--ink-light); margin-top:2px;">Student ID: ${escHtml(student.studentId || 'Pending')} · <span style="color:var(--success); font-weight:600;">Active</span></div>
-        </div>
+        <a href="https://portal.hindikineev.org/HKN_Parent_Guide.pdf" target="_blank"
+           style="display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--olive); text-decoration:none; border:1.5px solid var(--olive-mid); border-radius:var(--radius-md); padding:6px 12px; white-space:nowrap; flex-shrink:0; margin-top:4px;"
+           onmouseover="this.style.background='var(--olive-pale)'" onmouseout="this.style.background='transparent'">
+          📄 Parent Guide
+        </a>
       </div>
 
       ${sessName ? `
