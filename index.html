@@ -3238,8 +3238,27 @@ function saveStudentModal(existingId) {
         'Save anyway', 'btn-warning',
         () => {
           const p = AppState.pendingSave;
-          if (p) { DB.saveStudent(p.updated); AppState.resetModal(); closeModal(); renderDirectory(); showToast(p.isNew ? 'Student added' : 'Student updated — please review session data', 'warning'); }
-          AppState.pendingSave = null;
+          if (p) {
+            DB.saveStudent(p.updated);
+            const attCtx2 = AppState.attContext || null;
+            AppState.resetModal(); closeModal();
+            AppState.pendingSave = null;
+            if (attCtx2) {
+              AppState.attContext = null;
+              const sessEl = document.getElementById('att-session');
+              const dateEl = document.getElementById('att-date');
+              const teacherEl = document.getElementById('att-teacher');
+              const classTimeEl = document.getElementById('att-classtime');
+              if (sessEl) sessEl.value = attCtx2.sessName;
+              if (dateEl) { populateAttendanceDates(attCtx2.sessName); dateEl.value = attCtx2.date; }
+              if (teacherEl) teacherEl.value = attCtx2.teacher;
+              if (classTimeEl) classTimeEl.value = attCtx2.classTime;
+              loadAttendanceClass();
+            } else {
+              renderDirectory();
+            }
+            showToast(p.isNew ? 'Student added' : 'Student updated — please review session data', 'warning');
+          }
         }
       );
       return; // halt normal save — admin must confirm
@@ -3247,8 +3266,22 @@ function saveStudentModal(existingId) {
   }
 
   DB.saveStudent(updated);
+  const attCtx = AppState.attContext || null;
   AppState.resetModal(); closeModal();
-  renderDirectory();
+  if (attCtx) {
+    AppState.attContext = null;
+    const sessEl = document.getElementById('att-session');
+    const dateEl = document.getElementById('att-date');
+    const teacherEl = document.getElementById('att-teacher');
+    const classTimeEl = document.getElementById('att-classtime');
+    if (sessEl) sessEl.value = attCtx.sessName;
+    if (dateEl) { populateAttendanceDates(attCtx.sessName); dateEl.value = attCtx.date; }
+    if (teacherEl) teacherEl.value = attCtx.teacher;
+    if (classTimeEl) classTimeEl.value = attCtx.classTime;
+    loadAttendanceClass();
+  } else {
+    renderDirectory();
+  }
   // Teachers: trigger surgical merge-save to Drive after saving scores/notes
   if (typeof currentUser !== 'undefined' && currentUser?.role === 'teacher') {
     DriveSync.teacherSave();
