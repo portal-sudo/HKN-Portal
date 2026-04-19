@@ -6215,7 +6215,13 @@ function loadAttendanceClass() {
     const attLabel = { present: '✓ Present', absent: '✗ Absent', vacation: '~ Vacation', unmarked: '— Unmarked' };
     return `
       <tr id="att-row-${s.id}" style="${!isOwn ? 'opacity:0.6;' : ''}">
-        <td style="font-weight:500;">${escHtml(s.firstName)} ${escHtml(s.lastName)}</td>
+        <td style="font-weight:500;">
+          <a href="#" onclick="AppState.attContext={sessName:'${escAttr(sessName)}',date:'${escAttr(date)}',teacher:'${escAttr(teacher)}',classTime:'${escAttr(classTime)}'};openStudentModal('${s.id}');return false;"
+             style="color:var(--orange);text-decoration:none;font-weight:500;"
+             onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">
+            ${escHtml(s.firstName)} ${escHtml(s.lastName)}
+          </a>
+        </td>
         <td style="font-size:12px; color:var(--ink-light);">${escHtml(sd.teacher || '—')}</td>
         <td>
           ${isOwn ? `<div style="display:flex; gap:6px;">
@@ -7223,6 +7229,21 @@ function showModal(html) {
 function closeModal() {
   document.getElementById('active-modal-overlay')?.remove();
   AppState.resetModal();
+  // If modal was opened from attendance page, restore filters and re-render
+  if (AppState.attContext) {
+    const ctx = AppState.attContext;
+    AppState.attContext = null;
+    // Restore filter selections
+    const sessEl = document.getElementById('att-session');
+    const dateEl = document.getElementById('att-date');
+    const teacherEl = document.getElementById('att-teacher');
+    const classTimeEl = document.getElementById('att-classtime');
+    if (sessEl) sessEl.value = ctx.sessName;
+    if (dateEl) { populateAttendanceDates(ctx.sessName); dateEl.value = ctx.date; }
+    if (teacherEl) teacherEl.value = ctx.teacher;
+    if (classTimeEl) classTimeEl.value = ctx.classTime;
+    loadAttendanceClass();
+  }
 }
 
 function showConfirm(icon, title, msg, okLabel, okClass, onOk) {
