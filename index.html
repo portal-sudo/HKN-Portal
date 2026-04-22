@@ -494,7 +494,6 @@ tbody tr { transition: background var(--transition); }
       <button class="btn btn-primary w-full" onclick="intakeLookup()" style="justify-content:center;">
         Look up my student record →
       </button>
-      <div style="text-align:center; margin-top:12px;"><a href="#" onclick="backToLogin()" style="font-size:12px;">← Back to sign in</a></div>
     </div>
 
     <!-- Step 1.5: Not found — interest confirmation -->
@@ -531,7 +530,7 @@ tbody tr { transition: background var(--transition); }
     <div class="intake-step" id="intake-step-1c">
       <div id="intake-info-view"></div>
       <div style="margin-top:16px; text-align:center;">
-        <a href="#" onclick="backToLogin()" style="font-size:12px; color:var(--orange);">← Return to portal</a>
+        <a href="https://www.hindikineev.org" class="btn btn-primary" style="display:inline-block; text-decoration:none;">Done →</a>
       </div>
     </div>
 
@@ -539,7 +538,7 @@ tbody tr { transition: background var(--transition); }
     <div class="intake-step card" id="intake-step-3">
       <div id="intake-confirmation"></div>
       <div style="margin-top:20px; text-align:center;">
-        <a href="#" onclick="backToLogin()" style="font-size:12px; color:var(--orange);">← Return to portal</a>
+        <a href="https://www.hindikineev.org" class="btn btn-primary" style="display:inline-block; text-decoration:none;">Done →</a>
       </div>
     </div>
   </div>
@@ -6714,7 +6713,7 @@ function renderIntakeContactSchool(student) {
         Please contact us at <a href="mailto:info@hindikineev.org" style="color:var(--orange);">info@hindikineev.org</a>
         and we will be happy to assist you.
       </div>
-      <a href="#" onclick="backToLogin()" style="font-size:13px; color:var(--orange);">← Back to portal</a>
+      <a href="https://www.hindikineev.org" class="btn btn-primary" style="display:inline-block; text-decoration:none; margin-top:8px;">Done →</a>
     </div>
   `;
 }
@@ -6734,7 +6733,7 @@ function renderIntakeNotYet(student) {
       <div style="background:var(--cream-mid); border-radius:var(--radius-md); padding:14px 18px; font-size:13px; color:var(--ink-mid); margin-bottom:24px;">
         Questions? Contact us at <a href="mailto:info@hindikineev.org" style="color:var(--orange);">info@hindikineev.org</a>
       </div>
-      <a href="#" onclick="backToLogin()" style="font-size:13px; color:var(--orange);">← Back to portal</a>
+      <a href="https://www.hindikineev.org" class="btn btn-primary" style="display:inline-block; text-decoration:none; margin-top:8px;">Done →</a>
     </div>
   `;
 }
@@ -6811,7 +6810,7 @@ function renderIntakeInProcess(student, openSess) {
       <div style="background:var(--cream-mid); border-radius:var(--radius-md); padding:14px 18px; font-size:13px; color:var(--ink-mid); margin-bottom:24px;">
         Questions? Contact us at <a href="mailto:info@hindikineev.org" style="color:var(--orange);">info@hindikineev.org</a>
       </div>
-      <a href="#" onclick="backToLogin()" style="font-size:13px; color:var(--orange);">← Back to portal</a>
+      <a href="https://www.hindikineev.org" class="btn btn-primary" style="display:inline-block; text-decoration:none; margin-top:8px;">Done →</a>
     </div>
   `;
 }
