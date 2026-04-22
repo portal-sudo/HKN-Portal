@@ -2508,8 +2508,16 @@ function renderStudentTable() {
       case 'parent':  va = (a.parentFirstName+' '+a.parentLastName).toLowerCase(); vb = (b.parentFirstName+' '+b.parentLastName).toLowerCase(); break;
       case 'status':  va = a.status||''; vb = b.status||''; break;
       case 'session': va = sdA.session||''; vb = sdB.session||''; break;
-      case 'teacher': va = (sdA.teacher||'').toLowerCase(); vb = (sdB.teacher||'').toLowerCase(); break;
-      case 'level':   va = (sdA.classLevel||'').toLowerCase(); vb = (sdB.classLevel||'').toLowerCase(); break;
+      case 'teacher': {
+        const sdAr = (sdA.teacher) ? sdA : (a.sessionData||[]).slice().reverse().find(d => d.teacher) || sdA;
+        const sdBr = (sdB.teacher) ? sdB : (b.sessionData||[]).slice().reverse().find(d => d.teacher) || sdB;
+        va = (sdAr.teacher||'').toLowerCase(); vb = (sdBr.teacher||'').toLowerCase(); break;
+      }
+      case 'level': {
+        const sdAl = (sdA.classLevel) ? sdA : (a.sessionData||[]).slice().reverse().find(d => d.classLevel) || sdA;
+        const sdBl = (sdB.classLevel) ? sdB : (b.sessionData||[]).slice().reverse().find(d => d.classLevel) || sdB;
+        va = (sdAl.classLevel||'').toLowerCase(); vb = (sdBl.classLevel||'').toLowerCase(); break;
+      }
       case 'date':    va = a.timestamp||''; vb = b.timestamp||''; break;
       default:        va = ''; vb = '';
     }
