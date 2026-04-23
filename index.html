@@ -6645,33 +6645,12 @@ function renderIntakeNotYet(student) {
 }
 
 function renderIntakeInProcess(student, openSess) {
-  const firstName  = student.firstName || 'your student';
-  const bookPrices = intakeState.bookPrices || {};
-  const sessions   = intakeState.sessions   || [];
-
-  // Get student's session data for the open session
+  const firstName = student.firstName || 'your student';
   const sd = openSess
     ? (student.sessionData || []).find(d => d.session === openSess.name) || {}
     : {};
-  const feesPaid  = sd.feesPaid  || false;
-  const bookLevel = sd.bookLevel || '';
-
-  // Find previous session to determine if book is new
-  let needsBook = false;
-  let bookCost  = 0;
-  if (bookLevel && openSess && sessions.length > 0) {
-    const openIdx  = sessions.findIndex(s => s.name === openSess.name);
-    const prevSess = openIdx > 0 ? sessions[openIdx - 1] : null;
-    const prevSd   = prevSess
-      ? (student.sessionData || []).find(d => d.session === prevSess.name)
-      : null;
-    const prevBook = prevSd ? (prevSd.bookLevel || '') : '';
-    needsBook = bookLevel !== prevBook;
-    bookCost  = needsBook ? (bookPrices[bookLevel] || 0) : 0;
-  }
-
-  const enrollFee  = openSess ? openSess.fees : 0;
-  const totalOwed  = enrollFee + bookCost;
+  const feesPaid = sd.feesPaid || false;
+  const enrollFee = openSess ? openSess.fees : 0;
 
   document.getElementById('intake-step-1c').innerHTML = `
     <div style="text-align:center; padding:10px 0 20px;">
@@ -6692,19 +6671,11 @@ function renderIntakeInProcess(student, openSess) {
             Outstanding payment — ${escHtml(openSess.name)}
           </div>
           <div style="font-size:13px; color:var(--ink-mid);">
-            <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid rgba(0,0,0,0.08);">
-              <span>Enrollment fee</span><span><strong>$${enrollFee}</strong></span>
-            </div>
-            ${needsBook ? `
-              <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid rgba(0,0,0,0.08);">
-                <span>Book (${escHtml(bookLevel)})</span><span><strong>$${bookCost}</strong></span>
-              </div>
-            ` : ''}
             <div style="display:flex; justify-content:space-between; padding:6px 0; font-weight:600; font-size:14px;">
-              <span>Total</span><span>$${totalOwed}</span>
+              <span>Enrollment fee (includes book)</span><span>$${enrollFee}</span>
             </div>
           </div>
-          <div class="zelle-amount">$${totalOwed}</div>
+          <div class="zelle-amount">$${enrollFee}</div>
           <div style="font-size:13px; color:var(--ink-mid); margin-top:8px;">
             Send to: <strong>payments@hindikineev.org</strong>
           </div>
