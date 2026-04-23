@@ -6526,7 +6526,6 @@ function _intakeLookupCore() {
       const enrollmentOpen = result.enrollmentOpen || false;
       const openSess       = enrollmentOpen ? { name: result.openSessName, fees: result.openSessFees, term: result.openSessTerm, enrollmentOpen: true } : null;
       intakeState.sessions   = result.sessions   || [];
-      intakeState.bookPrices = result.bookPrices  || {};
 
       // Helper: find the best session to show for Active students —
       // current underway session (today between first/last class) or most recently started
@@ -6672,7 +6671,7 @@ function renderIntakeInProcess(student, openSess) {
           </div>
           <div style="font-size:13px; color:var(--ink-mid);">
             <div style="display:flex; justify-content:space-between; padding:6px 0; font-weight:600; font-size:14px;">
-              <span>Enrollment fee (includes book)</span><span>$${enrollFee}</span>
+              <span>Enrollment fee</span><span>$${enrollFee}</span>
             </div>
           </div>
           <div class="zelle-amount">$${enrollFee}</div>
