@@ -845,10 +845,6 @@ const DB = {
   saveClassLevels(arr){ Storage.set(KEYS.classLevels,  arr); if (typeof DriveSync !== 'undefined' && currentUser) DriveSync.scheduleSave(); },
   saveBookLevels(arr) { Storage.set(KEYS.bookLevels,  arr);  if (typeof DriveSync !== 'undefined' && currentUser) DriveSync.scheduleSave(); },
 
-  // Book prices: { 'Book 1': 20, 'Book 2': 20, ... }
-  getBookPrices()      { return Storage.get(KEYS.bookPrices)   || {}; },
-  saveBookPrices(obj)  { Storage.set(KEYS.bookPrices, obj);   if (typeof DriveSync !== 'undefined' && currentUser) DriveSync.scheduleSave(); },
-
   // Level->Book mapping: { 'Beg-1': 'Book 1', 'Beg-2': 'Book 2', ... }
   getLevelBookMap()    { return Storage.get(KEYS.levelBookMap) || {}; },
   saveLevelBookMap(obj){ Storage.set(KEYS.levelBookMap, obj); if (typeof DriveSync !== 'undefined' && currentUser) DriveSync.scheduleSave(); },
@@ -857,11 +853,6 @@ const DB = {
   bookForLevel(level) {
     const map = this.getLevelBookMap();
     return map[level] || '';
-  },
-  // Helper: get book price
-  priceForBook(book) {
-    const prices = this.getBookPrices();
-    return prices[book] || 0;
   },
   saveClassTimes(arr) { Storage.set(KEYS.classTimes,  arr); if (typeof DriveSync !== 'undefined' && currentUser) DriveSync.scheduleSave(); },
   saveClassNames(arr) { Storage.set(KEYS.classNames,  arr); if (typeof DriveSync !== 'undefined' && currentUser) DriveSync.scheduleSave(); },
@@ -945,7 +936,6 @@ const DB = {
       teachers:   this.getTeachers(),
       classLevels: this.getClassLevels(),
       bookLevels:   this.getBookLevels(),
-      bookPrices:   this.getBookPrices(),
       levelBookMap: this.getLevelBookMap(),
       classTimes: this.getClassTimes(),
       classNames: this.getClassNames(),
@@ -962,7 +952,6 @@ const DB = {
       teachers:    this.getTeachers(),
       classLevels: this.getClassLevels(),
       bookLevels:  this.getBookLevels(),
-      bookPrices:  this.getBookPrices(),
       levelBookMap:this.getLevelBookMap(),
       classTimes:  this.getClassTimes(),
       classNames:  this.getClassNames(),
@@ -978,7 +967,6 @@ const DB = {
     if (d.teachers)    Storage.set(KEYS.teachers,    d.teachers);
     if (d.classLevels) Storage.set(KEYS.classLevels, d.classLevels);
     if (d.bookLevels)  Storage.set(KEYS.bookLevels,  d.bookLevels);
-    if (d.bookPrices)  Storage.set(KEYS.bookPrices,  d.bookPrices);
     if (d.levelBookMap)Storage.set(KEYS.levelBookMap,d.levelBookMap);
     if (d.classTimes)  Storage.set(KEYS.classTimes,  d.classTimes);
     if (d.classNames)  Storage.set(KEYS.classNames,  d.classNames);
@@ -1523,10 +1511,6 @@ function seedAttributesIfEmpty() {
       'Int-1': 'Book 3', 'Int-2': 'Book 3',
       'Int-3': 'Book 4', 'Int-4': 'Book 4',
       'Adv-1': 'Book 5', 'Adv-2': 'Book 5',
-    });
-  if (!Object.keys(DB.getBookPrices()).length)
-    DB.saveBookPrices({
-      'Book 1': 30, 'Book 2': 30, 'Book 3': 35, 'Book 4': 35, 'Book 5': 35,
     });
   if (!DB.getClassTimes().length)
     DB.saveClassTimes(['Sat 9:00 AM', 'Sat 10:30 AM', 'Sat 12:00 PM', 'Sun 10:00 AM', 'Sun 11:30 AM']);
