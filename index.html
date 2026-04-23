@@ -2697,7 +2697,6 @@ function openStudentModal(studentId) {
             ? inputField('paymentDate_'+k, sd.paymentDate||'', 'date')
             : readonlyField(sd.paymentDate))}
         </div>
-        ${sess.term === 'Fall' ? renderFeeBreakdown(sess, sd) : ''}
         <div style="margin-bottom:14px;">
           <label class="form-label">Ability scores (0–5)</label>
           <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-top:8px;">
@@ -4263,31 +4262,6 @@ function autoFillBookLevel(classLevelSel, sessKey) {
     // Always update to reflect the mapping
     bookSel.value = book;
   }
-}
-
-function renderFeeBreakdown(sess, sd) {
-  const book      = DB.bookForLevel(sd.classLevel || '');
-  const bookPrice = book ? DB.priceForBook(book) : 0;
-  const sessFee   = sess.fees || 0;
-  const total     = sessFee + bookPrice;
-  const bookLabel = book ? (book + ' @ $' + bookPrice) : 'No book mapped for this level';
-  return '<div style="background:var(--olive-pale);border-radius:var(--radius-md);padding:10px 14px;margin-bottom:14px;font-size:12px;">' +
-    '<div style="font-weight:600;color:var(--olive);margin-bottom:6px;">Fall fee breakdown</div>' +
-    '<div style="display:flex;justify-content:space-between;"><span>Enrollment fee</span><span>$' + sessFee + '</span></div>' +
-    '<div style="display:flex;justify-content:space-between;color:' + (bookPrice > 0 ? 'var(--ink-mid)' : 'var(--ink-light)') + ';">' +
-      '<span>Book (' + escHtml(bookLabel) + ')</span><span>$' + bookPrice + '</span>' +
-    '</div>' +
-    '<div style="display:flex;justify-content:space-between;font-weight:600;border-top:1px solid var(--olive-mid);margin-top:6px;padding-top:6px;">' +
-      '<span>Total</span><span>$' + total + '</span>' +
-    '</div>' +
-  '</div>';
-}
-
-function saveBookPrice(book, val) {
-  const prices = DB.getBookPrices();
-  prices[book] = parseFloat(val) || 0;
-  DB.saveBookPrices(prices);
-  showToast('Book price saved', 'success');
 }
 
 function saveLevelBook(level, book) {
