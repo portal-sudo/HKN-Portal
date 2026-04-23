@@ -6481,10 +6481,6 @@ function renderIntakeInfoView(student, currentSess) {
         <div style="color:var(--ink-light); font-size:13px; padding:12px 0;">No active session found. Please contact the school for more information.</div>
       `}
     </div>
-
-    <div style="background:var(--orange-light); border:1px solid rgba(242,125,38,0.3); border-radius:var(--radius-md); padding:12px 16px; font-size:13px; color:var(--orange-dark); text-align:center;">
-      Enrollment for the next session is not yet open. You will receive an email when enrollment opens.
-    </div>
   `;
 }
 
@@ -6676,7 +6672,7 @@ function renderIntakeInProcess(student, openSess) {
           </div>
           <div class="zelle-amount">$${enrollFee}</div>
           <div style="font-size:13px; color:var(--ink-mid); margin-top:8px;">
-            Send to: <strong>payments@hindikineev.org</strong>
+            Send via Zelle to: <strong>payments@hindikineev.org</strong>
           </div>
           <div style="font-size:12px; color:var(--orange-dark); margin-top:6px;">
             Once we receive your payment, you'll receive a confirmation email.
@@ -7084,7 +7080,7 @@ function renderIntakeConfirmation(student) {
           </div>
           <div class="zelle-amount">$${activeSess.fees}</div>
           <div style="font-size:13px; color:var(--ink-mid); margin-top:8px;">
-            Send to: <strong>payments@hindikineev.org</strong>
+            Send via Zelle to: <strong>payments@hindikineev.org</strong>
           </div>
           <div style="font-size:12px; color:var(--orange-dark); margin-top:6px;">
             Once we receive your payment, you'll receive a confirmation email completing the enrollment.
