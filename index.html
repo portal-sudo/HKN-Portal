@@ -6671,7 +6671,7 @@ function renderIntakeInProcess(student, openSess) {
           </div>
           <div style="font-size:13px; color:var(--ink-mid);">
             <div style="display:flex; justify-content:space-between; padding:6px 0; font-weight:600; font-size:14px;">
-              <span>Enrollment fee</span><span>$${enrollFee}</span>
+              <span>Annual enrollment fee — covers Fall, Winter &amp; Spring sessions</span><span>$${enrollFee}</span>
             </div>
           </div>
           <div class="zelle-amount">$${enrollFee}</div>
@@ -7076,7 +7076,7 @@ function renderIntakeConfirmation(student) {
           </div>
           <div style="font-size:13px; color:var(--ink-mid); margin-bottom:10px;">
             <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid rgba(0,0,0,0.08);">
-              <span>Enrollment fee (${activeSess.name})</span><span><strong>$${activeSess.fees}</strong></span>
+              <span>Annual enrollment fee — covers Fall, Winter &amp; Spring sessions</span><span><strong>$${activeSess.fees}</strong></span>
             </div>
             <div style="display:flex; justify-content:space-between; padding:6px 0; font-weight:600; font-size:14px;">
               <span>Total due now</span><span>$${activeSess.fees}</span>
@@ -7088,7 +7088,6 @@ function renderIntakeConfirmation(student) {
           </div>
           <div style="font-size:12px; color:var(--orange-dark); margin-top:6px;">
             Once we receive your payment, you'll receive a confirmation email completing the enrollment.
-            Book fees (if applicable) will be communicated separately.
           </div>
         </div>
       ` : `
