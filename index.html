@@ -3408,14 +3408,8 @@ function renderFeesTable() {
     feeUpdateCount(); return;
   }
 
-  const isFall = sess.term === 'Fall';
   const feeAmt = sess.fees || 0;
-  const studentTotal = (s) => {
-    const sd = s._sd;
-    const enroll = feeAmt;
-    const book   = isFall && sd && sd.bookCost ? sd.bookCost : 0;
-    return enroll + book;
-  };
+  const studentTotal = (s) => feeAmt;
 
   const refunded    = students.filter(s => refundById[s.id]);
   const unenrolled  = refunded.length;
@@ -3446,9 +3440,7 @@ function renderFeesTable() {
           (isRefunded ? '<div style="font-size:11px;color:var(--danger);margin-top:2px;">Refunded $' + (refund.amount||0) + ' on ' + escHtml(refund.date||'') + ' · Sessions: ' + escHtml((refund.sessionsRefunded||[]).join(', ')) + '</div>' : '') +
         '</td>' +
         '<td><span class="badge badge-' + statusKey + '">' + escHtml(s.status) + '</span></td>' +
-        '<td style="font-size:12px;color:var(--ink-light);">' +
-          (isFall && sd && sd.bookCost ? 'Enroll: $' + feeAmt + ' + Book: $' + sd.bookCost + ' = <strong>$' + (feeAmt + sd.bookCost) + '</strong>' : '$' + feeAmt) +
-        '</td>' +
+        '<td style="font-size:12px;color:var(--ink-light);">$' + feeAmt + '</td>' +
         '<td>' + (isRefunded
           ? '<span style="color:var(--danger);font-size:13px;">↩ Refunded</span>'
           : isPaid
@@ -3587,10 +3579,6 @@ function openRefundDialog(studentId, currentSessName) {
     '</label>';
   }).join('');
 
-  // Book cost — not refundable
-  const sd = (s.sessionData || []).find(sd => sd.session === currentSessName);
-  const bookCost = (sd && sd.bookCost) ? sd.bookCost : 0;
-
   AppState.pendingImport = { refundStudentId: studentId, refundSessName: currentSessName };
 
   showModal('<div class="modal" style="max-width:480px;">' +
@@ -3599,9 +3587,8 @@ function openRefundDialog(studentId, currentSessName) {
       '<button class="modal-close" onclick="closeModal()">✕</button>' +
     '</div>' +
     '<div class="modal-body">' +
-      '<div style="font-size:13px;color:var(--ink-mid);margin-bottom:14px;">Select sessions to refund. Book charges are non-refundable.</div>' +
+      '<div style="font-size:13px;color:var(--ink-mid);margin-bottom:14px;">Select sessions to refund.</div>' +
       '<div style="margin-bottom:14px;">' + rows + '</div>' +
-      (bookCost > 0 ? '<div style="font-size:12px;color:var(--ink-light);margin-bottom:14px;padding:8px 10px;background:var(--cream-dark);border-radius:var(--radius-sm);">📚 Book cost ($' + bookCost + ') — non-refundable</div>' : '') +
       '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">' +
         '<label style="font-size:13px;font-weight:500;">Refund amount</label>' +
         '<span style="font-size:13px;">$</span>' +
