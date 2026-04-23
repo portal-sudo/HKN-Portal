@@ -4259,25 +4259,6 @@ function renderAttributes() {
           </div>
         </div>
       `).join('')}
-      <!-- Book Prices card -->
-      <div class="card">
-        <div class="card-title">Book Prices ($)</div>
-        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">
-          ${DB.getBookLevels().map(book => {
-            const price = DB.getBookPrices()[book] || 0;
-            return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-              <span style="font-size:13px;min-width:60px;">${escHtml(book)}</span>
-              <div style="display:flex;align-items:center;gap:4px;">
-                <span style="font-size:13px;">$</span>
-                <input type="number" min="0" step="1" value="${price}"
-                  style="width:70px;padding:4px 6px;border:1px solid var(--olive-mid);border-radius:var(--radius-sm);font-size:13px;"
-                  onchange="saveBookPrice('${escAttr(book)}', this.value)"/>
-              </div>
-            </div>`;
-          }).join('')}
-        </div>
-      </div>
-
       <!-- Level → Book mapping card -->
       <div class="card">
         <div class="card-title">Level → Book Mapping</div>
