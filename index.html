@@ -4990,6 +4990,7 @@ const DriveSync = {
   // ── Get a valid access token for Drive (silent — no popup) ──
   driveToken: null,
   driveTokenExpiry: null,
+  loading: false,
 
   isDriveTokenValid() {
     return !!(this.driveToken && this.driveTokenExpiry && Date.now() < this.driveTokenExpiry);
@@ -5032,13 +5033,12 @@ const DriveSync = {
   // ── Load data from Drive into localStorage ──
   async load() {
     try {
+      this.loading = true;
       this.setStatus('syncing');
-      // Clear cached file ID and token on load attempt to force fresh auth
       let token;
       try {
         token = await this.getToken();
       } catch(e) {
-        // Token fetch failed — clear cached tokens and try once more
         this.driveToken = null; this.driveTokenExpiry = null;
         GMAIL.accessToken = null; GMAIL.tokenExpiry = null;
         token = await this.getToken();
@@ -5049,31 +5049,35 @@ const DriveSync = {
         { headers: { Authorization: 'Bearer ' + token } }
       );
       if (res.status === 403 || res.status === 401) {
-        // Token expired — clear and show synced (will retry on next action)
         this.driveToken = null; this.driveTokenExpiry = null;
         GMAIL.accessToken = null; GMAIL.tokenExpiry = null;
         this.fileId = null;
         console.warn('DriveSync.load: token expired, cleared for refresh');
-        this.setStatus('synced'); // Don't show error — just silently recover
+        this.setStatus('synced');
+        this.loading = false;
         return;
       }
       if (!res.ok) throw new Error('Could not read Drive file: ' + res.status);
       const data = await res.json();
-      // Only restore if Drive has actual data
       if (data && Object.keys(data).length > 0) {
         DB.restoreBackup(data);
         console.log('DriveSync: loaded from Drive');
       }
       this.lastSynced = new Date();
       this.setStatus('synced');
+      this.loading = false;
     } catch(e) {
       console.warn('DriveSync.load failed:', e.message);
       this.setStatus('error');
+      this.loading = false;
     }
   },
 
   // ── Save localStorage data to Drive (debounced) ──
   scheduleSave() {
+    // Never schedule a save while Drive is still loading — prevents overwriting
+    // Drive data with empty/partial localStorage during the login sequence
+    if (this.loading) return;
     if (this.syncTimer) clearTimeout(this.syncTimer);
     this.syncTimer = setTimeout(() => {
       const isTeacher = (typeof currentUser !== 'undefined') && currentUser?.role === 'teacher';
