@@ -4954,8 +4954,14 @@ function doRestore() {
       reader.onload = e => {
         try {
           DB.importJSON(e.target.result);
-          renderBackup();
-          showToast('Data restored successfully', 'success');
+          // Immediately save to Drive so restored data persists
+          DriveSync.save().then(() => {
+            renderBackup();
+            showToast('Data restored and saved to Drive', 'success');
+          }).catch(() => {
+            renderBackup();
+            showToast('Data restored locally — Drive sync failed, please sync manually', 'warning');
+          });
         } catch { showToast('Invalid backup file', 'error'); }
       };
       reader.readAsText(file);
