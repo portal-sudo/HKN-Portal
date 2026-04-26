@@ -473,8 +473,8 @@ tbody tr { transition: background var(--transition); }
 
     <!-- Step 1: Lookup -->
     <div class="intake-step active card" id="intake-step-1">
-      <div class="intake-step-title">Welcome to HKN Enrollment</div>
-      <div class="intake-step-subtitle">Please enter your details to get started. We'll look up your student record.</div>
+      <div class="intake-step-title">HKN Student Portal</div>
+      <div class="intake-step-subtitle">Enter your details below and we'll find your student record.</div>
       <div class="form-group" style="margin-bottom:14px;">
         <label class="form-label">Parent / Guardian Name</label>
         <input type="text" class="form-input" id="intake-parent-name" placeholder="First Last"/>
@@ -6443,29 +6443,42 @@ function renderViewerTable() {
 function showPublicIntake() {
   intakeState = {};
   AppState.intakeScores = { speaking: 0, reading: 0, writing: 0 };
-  // Check if intake is enabled — admin can disable via School Attributes
-  const intakeEnabled = DB.getSettings().intakeEnabled !== false; // default true
-  if (!intakeEnabled) {
-    showScreen('public-intake');
-    // Replace the lookup form with a closed message
-    const step1 = document.getElementById('intake-step-1');
-    if (step1) step1.innerHTML = `
-      <div style="text-align:center; padding:20px 0;">
-        <div style="font-size:40px; margin-bottom:16px;">🔒</div>
-        <div style="font-family:var(--serif); font-size:22px; font-weight:600; color:var(--olive); margin-bottom:12px;">
-          Portal Temporarily Unavailable
-        </div>
-        <div style="font-size:14px; color:var(--ink-mid); line-height:1.7; margin-bottom:20px;">
-          Our enrollment portal is currently closed for maintenance.<br>
-          Please visit <a href="https://www.hindikineev.org" style="color:var(--orange);">hindikineev.org</a>
-          for updates or contact us at
-          <a href="mailto:info@hindikineev.org" style="color:var(--orange);">info@hindikineev.org</a>
-        </div>
-        <a href="https://www.hindikineev.org" class="btn btn-primary" style="display:inline-block; text-decoration:none;">← Back to website</a>
-      </div>`;
-    return;
-  }
   showScreen('public-intake');
+
+  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyZfMMOkbTZmTGmO_Z0IEzsWs91FPRxk5kx1SvuGTthOAOCcOOPo4uXMVoie2a2iTcpYA/exec';
+  const step1 = document.getElementById('intake-step-1');
+
+  // Show brief loading state while checking settings from Drive via Apps Script
+  if (step1) step1.style.opacity = '0.4';
+
+  const payload = encodeURIComponent(JSON.stringify({ action: 'getSettings' }));
+  fetch(APPS_SCRIPT_URL + '?payload=' + payload)
+    .then(r => r.json())
+    .then(result => {
+      if (step1) step1.style.opacity = '1';
+      if (result.intakeEnabled === false) {
+        // Portal is closed — show unavailable message
+        if (step1) step1.innerHTML = `
+          <div style="text-align:center; padding:20px 0;">
+            <div style="font-size:40px; margin-bottom:16px;">🔒</div>
+            <div style="font-family:var(--serif); font-size:22px; font-weight:600; color:var(--olive); margin-bottom:12px;">
+              Portal Temporarily Unavailable
+            </div>
+            <div style="font-size:14px; color:var(--ink-mid); line-height:1.7; margin-bottom:20px;">
+              Our enrollment portal is currently closed for maintenance.<br>
+              Please visit <a href="https://www.hindikineev.org" style="color:var(--orange);">hindikineev.org</a>
+              for updates or contact us at
+              <a href="mailto:info@hindikineev.org" style="color:var(--orange);">info@hindikineev.org</a>
+            </div>
+            <a href="https://www.hindikineev.org" class="btn btn-primary" style="display:inline-block; text-decoration:none;">← Back to website</a>
+          </div>`;
+      }
+      // If intakeEnabled is true or missing — form is already showing, nothing to do
+    })
+    .catch(() => {
+      // Apps Script call failed — fail open, let parents through
+      if (step1) step1.style.opacity = '1';
+    });
 }
 
 function renderIntakeInfoView(student, currentSess) {
