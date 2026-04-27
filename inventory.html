@@ -260,7 +260,9 @@ body { font-family: var(--sans); background: var(--cream); color: var(--ink); mi
           </div>
           <div class="form-group">
             <label>Teacher Name</label>
-            <input type="text" id="tch-teacher" placeholder="Teacher name"/>
+            <select id="tch-teacher">
+              <option value="">— Select teacher —</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Book Level</label>
@@ -350,6 +352,7 @@ function doLogin() {
         document.getElementById('login-screen').style.display = 'none';
         document.getElementById('app-screen').style.display = 'block';
         setDefaultDates();
+        loadTeachers();
         loadSummary();
       }
     }).requestAccessToken();
@@ -381,6 +384,31 @@ async function sheetsAppend(sheet, values) {
   });
   if (!res.ok) throw new Error('Sheets write failed: ' + res.status);
   return res.json();
+}
+
+// ── Load Teachers from Drive JSON ─────────────────────────────
+async function loadTeachers() {
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${DRIVE_FILE_ID}?alt=media`,
+      { headers: { Authorization: 'Bearer ' + accessToken }});
+    if (!res.ok) return;
+    const data = await res.json();
+    const teachers = (data.teachers || []).map(t =>
+      typeof t === 'string' ? t : ((t.firstName || '') + ' ' + (t.lastName || '')).trim()
+    ).filter(Boolean).sort();
+
+    const sel = document.getElementById('tch-teacher');
+    sel.innerHTML = '<option value="">— Select teacher —</option>';
+    teachers.forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name; opt.textContent = name;
+      sel.appendChild(opt);
+    });
+  } catch(e) {
+    // Silently fail — teacher dropdown stays as-is
+    console.warn('Could not load teachers:', e.message);
+  }
 }
 
 // ── Load Summary ──────────────────────────────────────────────
@@ -493,8 +521,8 @@ async function logTeacherCopy() {
 }
 
 function clearTchForm() {
-  ['tch-date','tch-teacher','tch-notes'].forEach(id => document.getElementById(id).value = '');
-  ['tch-level','tch-type','tch-reason'].forEach(id => document.getElementById(id).value = '');
+  ['tch-date','tch-notes'].forEach(id => document.getElementById(id).value = '');
+  ['tch-teacher','tch-level','tch-type','tch-reason'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('tch-returned').value = 'No';
 }
 
