@@ -310,6 +310,38 @@ body { font-family: var(--sans); background: var(--cream); color: var(--ink); mi
       </div>
     </div>
 
+    <!-- Export Students for Book Inventory -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">Export Students for Book Inventory</div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:13px; color:var(--ink-light); margin-bottom:16px;">
+          Download a CSV of students filtered by session and status. Paste into the <strong>Students</strong> tab of the inventory spreadsheet to update the Distributed count.
+        </p>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Session</label>
+            <select id="exp-session">
+              <option value="">— All sessions —</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select id="exp-status">
+              <option value="Active">Active</option>
+              <option value="In-Process">In-Process</option>
+              <option value="">All statuses</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-top:16px; display:flex; gap:10px; align-items:center;">
+          <button class="btn btn-primary" onclick="exportStudents()">⬇ Download CSV</button>
+          <span id="exp-count" style="font-size:12px; color:var(--ink-light);"></span>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -394,10 +426,11 @@ async function loadTeachers() {
       { headers: { Authorization: 'Bearer ' + accessToken }});
     if (!res.ok) return;
     const data = await res.json();
+
+    // Populate teacher dropdown
     const teachers = (data.teachers || []).map(t =>
       typeof t === 'string' ? t : ((t.firstName || '') + ' ' + (t.lastName || '')).trim()
     ).filter(Boolean).sort();
-
     const sel = document.getElementById('tch-teacher');
     sel.innerHTML = '<option value="">— Select teacher —</option>';
     teachers.forEach(name => {
@@ -405,9 +438,78 @@ async function loadTeachers() {
       opt.value = name; opt.textContent = name;
       sel.appendChild(opt);
     });
+
+    // Populate session dropdown for export
+    const sessions = (data.sessions || []).slice().reverse();
+    const expSel = document.getElementById('exp-session');
+    expSel.innerHTML = '<option value="">— All sessions —</option>';
+    sessions.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.name; opt.textContent = s.name;
+      expSel.appendChild(opt);
+    });
+    // Default to most recent session
+    if (sessions.length > 0) expSel.value = sessions[0].name;
+
   } catch(e) {
-    // Silently fail — teacher dropdown stays as-is
-    console.warn('Could not load teachers:', e.message);
+    console.warn('Could not load Drive data:', e.message);
+  }
+}
+
+// ── Export Students ───────────────────────────────────────────
+async function exportStudents() {
+  const session = document.getElementById('exp-session').value;
+  const status  = document.getElementById('exp-status').value;
+  const countEl = document.getElementById('exp-count');
+  countEl.textContent = 'Loading…';
+
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${DRIVE_FILE_ID}?alt=media`,
+      { headers: { Authorization: 'Bearer ' + accessToken }});
+    if (!res.ok) throw new Error('Drive read failed');
+    const data = await res.json();
+    const students = data.students || [];
+
+    // Filter students
+    const filtered = students.filter(s => {
+      if (status && s.status !== status) return false;
+      if (!session) return true;
+      return (s.sessionData || []).some(sd => sd.session === session);
+    });
+
+    if (filtered.length === 0) {
+      countEl.textContent = 'No students match filters';
+      return;
+    }
+
+    // Build CSV rows
+    const headers = ['Student ID', 'First Name', 'Last Name', 'Session', 'Book Level', 'Teacher'];
+    const rows = filtered.map(s => {
+      const sd = session
+        ? (s.sessionData || []).find(d => d.session === session) || {}
+        : (s.sessionData || []).slice(-1)[0] || {};
+      return [
+        s.studentId || '',
+        s.firstName || '',
+        s.lastName  || '',
+        sd.session  || session || '',
+        sd.bookLevel|| '',
+        sd.teacher  || '',
+      ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+    });
+
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `HKN_Students_${session || 'All'}_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    countEl.textContent = `✓ ${filtered.length} students exported`;
+  } catch(e) {
+    countEl.textContent = 'Export failed: ' + e.message;
   }
 }
 
