@@ -1822,6 +1822,7 @@ function buildSidebar() {
     { id:'classes',  icon:'🏫', label:'Classes' },
     { id:'scoring-guide', icon:'📖', label:'Scoring guide' },
     ...(isAdmin ? [{ id:'fees', icon:'💰', label:'Fees tracker' }] : []),
+    ...(isAdmin ? [{ id:'inventory', icon:'📚', label:'Book inventory' }] : []),
     ...(isAdmin ? [
       { id:'attributes', icon:'⚙️', label:'School attributes' },
       { section: 'System' },
@@ -1868,6 +1869,7 @@ function navigateTo(page) {
     templates:   renderTemplates,
     attendance:  renderAttendance,
     fees:        renderFees,
+    inventory:   () => { window.open('https://portal.hindikineev.org/inventory.html', '_blank'); },
   };
   const fn = pages[page];
   if (fn) fn();
