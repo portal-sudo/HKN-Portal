@@ -318,7 +318,7 @@ body { font-family: var(--sans); background: var(--cream); color: var(--ink); mi
 
 <script>
 // ── Config ───────────────────────────────────────────────────
-const CLIENT_ID   = ''; // Set via School Attributes / same as portal
+const CLIENT_ID   = '403780981402-4d6k69prpesahb6911vqukrbiiji2ech.apps.googleusercontent.com';
 const SHEET_ID    = '1msQkJI_Th1bdslm-frqhwnqGIrwQp8Xl';
 const DRIVE_FILE_ID = '1IIRLOJGGTcI2zlnXqKJSdOIkb-iYbo5m';
 const SCOPES      = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly email profile';
@@ -328,13 +328,10 @@ let accessToken = null;
 let tokenExpiry  = null;
 
 // ── Auth ──────────────────────────────────────────────────────
-// Simpler: load client ID from the portal's Drive JSON after getting a basic token
-// We use a two-step: get basic profile token first, then full token
 function doLogin() {
-  const TEMP_CLIENT_ID_KEY = 'hkn_gmail_client_id';
-  let clientId = localStorage.getItem(TEMP_CLIENT_ID_KEY);
+  proceed(CLIENT_ID);
 
-  const proceed = (cid) => {
+  function proceed(cid) {
     google.accounts.oauth2.initTokenClient({
       client_id: cid,
       scope: SCOPES,
@@ -356,15 +353,7 @@ function doLogin() {
         loadSummary();
       }
     }).requestAccessToken();
-  };
-
-  if (clientId) { proceed(clientId); return; }
-
-  // Prompt admin to enter client ID once
-  const cid = prompt('Enter Gmail OAuth Client ID (from School Attributes in the portal):\nThis will be saved for future logins.');
-  if (!cid) return;
-  localStorage.setItem(TEMP_CLIENT_ID_KEY, cid);
-  proceed(cid);
+  }
 }
 
 function doLogout() {
