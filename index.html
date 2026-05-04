@@ -6689,7 +6689,14 @@ function _intakeLookupCore() {
         return;
       }
 
-      // ── Case 5: Dropped / Alumni / other ─────────────────────
+      // ── Case 5: Interest (already registered) ────────────────
+      if (found.status === 'Interest') {
+        renderIntakeContactSchool(found, 'interest');
+        intakeGoStep('1c');
+        return;
+      }
+
+      // ── Case 6: Dropped / Alumni / Graduated / other ─────────
       renderIntakeContactSchool(found);
       intakeGoStep('1c');
 
@@ -6713,21 +6720,25 @@ function _intakeLookupCore() {
   });
 }
 
-function renderIntakeContactSchool(student) {
+function renderIntakeContactSchool(student, reason) {
   const firstName = student.firstName || 'your student';
   const isGraduated = student.status === 'Graduated';
+  const isInterest  = reason === 'interest';
 
   document.getElementById('intake-step-1c').innerHTML = `
     <div style="text-align:center; padding:10px 0 20px;">
-      <div style="font-size:40px; margin-bottom:16px;">${isGraduated ? '🎓' : '🏫'}</div>
+      <div style="font-size:40px; margin-bottom:16px;">${isGraduated ? '🎓' : isInterest ? '📋' : '🏫'}</div>
       <div style="font-size:20px; font-weight:600; color:var(--olive-dark); margin-bottom:10px;">
-        ${isGraduated ? `Congratulations, ${escHtml(firstName)}!` : 'Please Contact the School'}
+        ${isGraduated ? `Congratulations, ${escHtml(firstName)}!` : isInterest ? 'We Have Your Interest Form' : 'Please Contact the School'}
       </div>
       <div style="font-size:14px; color:var(--ink-mid); line-height:1.7; margin-bottom:20px;">
         ${isGraduated ? `
           <strong>${escHtml(firstName)}</strong> has completed all levels of the Hindi Ki Neev program
           and graduated from our school. We are incredibly proud of this achievement and grateful
           for the years spent learning Hindi with us.
+        ` : isInterest ? `
+          Thank you — we have already received your interest form for <strong>${escHtml(firstName)}</strong>.
+          We will be in touch when Fall enrollment opens. No further action is needed at this time.
         ` : `
           We found a record for <strong>${escHtml(firstName)}</strong> in our system.
           If you are thinking of re-enrolling and continuing your Hindi journey with us,
@@ -6739,6 +6750,9 @@ function renderIntakeContactSchool(student) {
           <strong>We would love to stay connected!</strong> If you are interested in giving back
           and helping younger students on their Hindi journey, we welcome you to volunteer as a
           teacher aide. Please reach out — we would be delighted to have you.
+        ` : isInterest ? `
+          In the meantime, if you have any questions please contact us at
+          <a href="mailto:info@hindikineev.org" style="color:var(--orange);">info@hindikineev.org</a>
         ` : `
           Please contact us at <a href="mailto:info@hindikineev.org" style="color:var(--orange);">info@hindikineev.org</a>
           and we will be happy to discuss re-enrollment options for <strong>${escHtml(firstName)}</strong>.
