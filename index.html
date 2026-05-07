@@ -2588,7 +2588,7 @@ function renderStudentTable() {
         <td style="font-weight:500;">${s.firstName} ${s.lastName}</td>
         <td style="color:var(--ink-light);">${s.parentFirstName} ${s.parentLastName}</td>
         <td><span class="badge badge-${(s.status||'').toLowerCase().replace('-','').replace(' ','')}">${s.status}</span></td>
-        ${dateCell}${dobCell}${sessionCell}${teacherCell}${levelCell}
+        ${dobCell}${dateCell}${sessionCell}${teacherCell}${levelCell}
         <td onclick="event.stopPropagation();"></td>
       </tr>
     `;
