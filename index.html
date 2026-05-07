@@ -2511,7 +2511,9 @@ function renderStudentTable() {
   // Age/DoB helper
   const calcAge = (dob) => {
     if (!dob) return null;
-    const d = new Date(dob);
+    const parts = dob.split('-');
+    if (parts.length !== 3) return null;
+    const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
     if (isNaN(d)) return null;
     const today = new Date();
     let age = today.getFullYear() - d.getFullYear();
@@ -2520,7 +2522,9 @@ function renderStudentTable() {
   };
   const fmtDob = (dob) => {
     if (!dob) return '—';
-    const d = new Date(dob);
+    const parts = dob.split('-');
+    if (parts.length !== 3) return '—';
+    const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
     if (isNaN(d)) return '—';
     return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
   };
