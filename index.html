@@ -2488,6 +2488,7 @@ function renderStudentTable() {
         va = (sdAl.classLevel||'').toLowerCase(); vb = (sdBl.classLevel||'').toLowerCase(); break;
       }
       case 'date':    va = a.timestamp||''; vb = b.timestamp||''; break;
+      case 'age':     va = a.dob||''; vb = b.dob||''; break;
       default:        va = ''; vb = '';
     }
     return va < vb ? -dir : va > vb ? dir : 0;
@@ -2501,12 +2502,28 @@ function renderStudentTable() {
   const isInProcess  = status === 'In-Process';
   const isActive     = status === 'Active';
   const isDateMode   = isInterest || isInvited || isInProcess;
-  const showScores   = isActive;
-  const showSession  = !isDateMode;
+  const showSession  = !isDateMode && !isActive;
   const showTeacher  = !isDateMode;
   const showLevel    = !isDateMode;
 
   const dateColLabel = isInterest ? 'Interest since' : isInvited ? 'Invited since' : 'Enrolled since';
+
+  // Age/DoB helper
+  const calcAge = (dob) => {
+    if (!dob) return null;
+    const d = new Date(dob);
+    if (isNaN(d)) return null;
+    const today = new Date();
+    let age = today.getFullYear() - d.getFullYear();
+    if (today.getMonth() < d.getMonth() || (today.getMonth() === d.getMonth() && today.getDate() < d.getDate())) age--;
+    return age;
+  };
+  const fmtDob = (dob) => {
+    if (!dob) return '—';
+    const d = new Date(dob);
+    if (isNaN(d)) return '—';
+    return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+  };
 
   const thStyle = 'cursor:pointer; user-select:none; white-space:nowrap;';
   const arrow = (col) => currentSort.col === col ? (currentSort.dir === 'asc' ? ' ▲' : ' ▼') : ' ⬍';
@@ -2518,18 +2535,18 @@ function renderStudentTable() {
   const thead = document.getElementById('dir-thead-row');
   if (thead) thead.innerHTML =
     th('id','ID') + th('name','Student name') + th('parent','Parent') + th('status','Status') +
+    th('age', 'Age — DoB') +
     (isDateMode  ? th('date', dateColLabel) : '') +
     (showSession ? th('session','Session') : '') +
     (showTeacher ? th('teacher','Teacher') : '') +
     (showLevel   ? th('level','Level')   : '') +
-    (showScores  ? '<th>Speak</th><th>Read</th><th>Write</th>' : '') +
     '<th></th>';
 
   const tbody = document.getElementById('student-tbody');
   if (!tbody) return;
 
-  const colCount = 5 + (isDateMode ? 1 : 0) + (showSession ? 1 : 0) + (showTeacher ? 1 : 0) +
-                   (showLevel ? 1 : 0) + (showScores ? 3 : 0) + 1;
+  const colCount = 5 + 1 + (isDateMode ? 1 : 0) + (showSession ? 1 : 0) + (showTeacher ? 1 : 0) +
+                   (showLevel ? 1 : 0) + 1;
 
   if (students.length === 0) {
     tbody.innerHTML = `<tr><td colspan="${colCount}" style="text-align:center; padding:32px; color:var(--ink-light);">No students match your filters</td></tr>`;
@@ -2562,11 +2579,8 @@ function renderStudentTable() {
     const sessionCell  = showSession ? `<td style="font-size:12px;">${sd.session || '—'}</td>` : '';
     const teacherCell  = showTeacher ? `<td style="font-size:12px;">${sd.teacher || '—'}</td>` : '';
     const levelCell    = showLevel   ? `<td style="font-size:12px;">${sd.classLevel || '—'}</td>` : '';
-    const scoreCells   = showScores
-      ? `<td>${sd.speakingScore !== undefined ? scoreBar(sd.speakingScore) : '—'}</td>
-         <td>${sd.readingScore  !== undefined ? scoreBar(sd.readingScore)  : '—'}</td>
-         <td>${sd.writingScore  !== undefined ? scoreBar(sd.writingScore)  : '—'}</td>`
-      : '';
+    const age          = calcAge(s.dob);
+    const dobCell      = `<td style="font-size:12px; white-space:nowrap;">${age !== null ? age + ' — ' + fmtDob(s.dob) : '—'}</td>`;
 
     return `
       <tr style="cursor:pointer;" onclick="openStudentModal('${s.id}')">
@@ -2574,7 +2588,7 @@ function renderStudentTable() {
         <td style="font-weight:500;">${s.firstName} ${s.lastName}</td>
         <td style="color:var(--ink-light);">${s.parentFirstName} ${s.parentLastName}</td>
         <td><span class="badge badge-${(s.status||'').toLowerCase().replace('-','').replace(' ','')}">${s.status}</span></td>
-        ${dateCell}${sessionCell}${teacherCell}${levelCell}${scoreCells}
+        ${dateCell}${dobCell}${sessionCell}${teacherCell}${levelCell}
         <td onclick="event.stopPropagation();"></td>
       </tr>
     `;
