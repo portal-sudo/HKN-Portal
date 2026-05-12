@@ -545,7 +545,7 @@ tbody tr { transition: background var(--transition); }
     </div>
   </div>
   <div style="text-align:center; padding:16px 0 24px;">
-    <a href="https://www.hindikineev.org" style="font-size:18px; color:var(--ink-light); text-decoration:none;">← Return to homepage</a>
+    <a href="https://www.hindikineev.org" style="font-size:13px; color:var(--ink-light); text-decoration:none;">← Return to homepage</a>
   </div>
 </div>
 
@@ -892,7 +892,7 @@ const DB = {
       const fullName = `${s.firstName} ${s.lastName}`.toLowerCase();
       const parentName = `${s.parentFirstName} ${s.parentLastName}`.toLowerCase();
       const q = name.toLowerCase();
-      if (name && !fullName.includes(q) && !parentName.includes(q) && !(s.studentId||'').toLowerCase().includes(q)) return false;
+      if (name && !fullName.includes(q) && !parentName.includes(q) && !(s.studentId||'').toLowerCase().includes(q) && !(s.notes||'').toLowerCase().includes(q)) return false;
       if (status  && s.status !== status) return false;
       if (teacher || classLevel || session) {
         const allSessions = this.getSessions().map(s => s.name);
@@ -2417,7 +2417,7 @@ function renderDirectory() {
       </div>
     </div>
     <div class="filter-bar">
-      <input type="text" class="form-input" id="filter-search" placeholder="🔍  Search name, ID…" oninput="renderStudentTable()" value="${currentStudentFilter.name||''}"/>
+      <input type="text" class="form-input" id="filter-search" placeholder="🔍  Search name, ID, notes…" oninput="renderStudentTable()" value="${currentStudentFilter.name||''}"/>
       <select class="form-select" id="filter-session" onchange="renderStudentTable()">
         <option value="">All sessions</option>
         ${sessions.map(s => `<option value="${s.name}" ${currentStudentFilter.session===s.name?'selected':''}>${s.name}</option>`).join('')}
