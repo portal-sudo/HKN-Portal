@@ -1685,7 +1685,7 @@ async function doGoogleLogin() {
         showErr('Viewer access requires a @hindikineev.org Google account.'); return;
       }
       currentUser = { email, role: 'viewer', name: email.split('@')[0] };
-      loadViewerScreen(); return;
+      DriveSync.load().then(() => loadViewerScreen()).catch(() => loadViewerScreen()); return;
     }
 
     loadAppShell();
