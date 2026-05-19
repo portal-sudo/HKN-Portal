@@ -4200,6 +4200,21 @@ function renderAttributes() {
       </div>
     </div>
 
+    <!-- Active Student Portal Message -->
+    <div class="card" style="margin-bottom:16px; border-color:var(--olive); border-width:1.5px;">
+      <div class="card-title">🎓 Active Student Portal Message</div>
+      <div style="font-size:13px; color:var(--ink-mid); margin-bottom:12px;">
+        Shown to Active students when they log into the parent portal, before they see their student info. Leave blank to show a Hindi/Indian quote of the day instead.
+      </div>
+      <textarea class="form-textarea" id="active-student-msg-text" rows="4"
+        placeholder="e.g. Welcome back! Classes resume Saturday September 6. Please ensure your child brings all their books and materials."
+        style="margin-bottom:10px;">${escHtml(DB.getSettings().activeStudentMessage || '')}</textarea>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-primary btn-sm" onclick="saveActiveStudentMsg()">💾 Save message</button>
+        <button class="btn btn-secondary btn-sm" onclick="clearActiveStudentMsg()">✕ Clear</button>
+      </div>
+    </div>
+
     <!-- Parent Portal Access -->
     <div class="card" style="margin-bottom:16px; border-color:var(--olive); border-width:1.5px;">
       <div class="card-title">🔒 Parent Portal Access</div>
@@ -4350,6 +4365,25 @@ function clearMotd() {
   const el = document.getElementById('motd-text');
   if (el) el.value = '';
   showToast('Message cleared', 'success');
+}
+
+function saveActiveStudentMsg() {
+  const text = document.getElementById('active-student-msg-text')?.value.trim() || '';
+  const settings = DB.getSettings();
+  settings.activeStudentMessage = text;
+  DB.saveSettings(settings);
+  DriveSync.save();
+  showToast(text ? 'Student portal message saved' : 'Student portal message cleared', 'success');
+}
+
+function clearActiveStudentMsg() {
+  const settings = DB.getSettings();
+  settings.activeStudentMessage = '';
+  DB.saveSettings(settings);
+  DriveSync.save();
+  const el = document.getElementById('active-student-msg-text');
+  if (el) el.value = '';
+  showToast('Student portal message cleared', 'success');
 }
 
 function addTeacher() {
@@ -6682,7 +6716,7 @@ function _intakeLookupCore() {
         intakeState.student    = found;
         intakeState.isNew      = false;
         intakeState.isInterest = false;
-        renderIntakeInfoView(found, getBestSession());
+        renderIntakeActiveWelcome(found);
         intakeGoStep('1c');
         return;
       }
@@ -6741,6 +6775,93 @@ function _intakeLookupCore() {
     showToast('Could not reach lookup service. Please try again.', 'error');
     console.warn('Apps Script lookup failed:', err.message);
   });
+}
+
+// ── Hindi/Indian quotes of the day ───────────────────────────
+const HKN_QUOTES = [
+  { text: "A child educated only at school is an uneducated child.", author: "George Santayana" },
+  { text: "The roots of education are bitter, but the fruit is sweet.", author: "Aristotle" },
+  { text: "Education is the most powerful weapon which you can use to change the world.", author: "Nelson Mandela" },
+  { text: "First say to yourself what you would be, then do what you have to do.", author: "Epictetus" },
+  { text: "Language is the road map of a culture. It tells you where its people come from and where they are going.", author: "Rita Mae Brown" },
+  { text: "To know another language is to have a second soul.", author: "Charlemagne" },
+  { text: "A different language is a different vision of life.", author: "Federico Fellini" },
+  { text: "One who has knowledge, has everything.", author: "Chanakya (Arthashastra)" },
+  { text: "Before you act, listen. Before you react, think. Before you spend, earn. Before you criticise, wait. Before you pray, forgive. Before you quit, try.", author: "William Arthur Ward" },
+  { text: "The measure of intelligence is the ability to change.", author: "Albert Einstein" },
+  { text: "Live as if you were to die tomorrow. Learn as if you were to live forever.", author: "Mahatma Gandhi" },
+  { text: "An investment in knowledge pays the best interest.", author: "Benjamin Franklin" },
+  { text: "Where there is love there is life.", author: "Mahatma Gandhi" },
+  { text: "In the middle of every difficulty lies opportunity.", author: "Albert Einstein" },
+  { text: "Arise, awake, and stop not till the goal is reached.", author: "Swami Vivekananda" },
+  { text: "You cannot teach a man anything; you can only help him discover it within himself.", author: "Galileo Galilei" },
+  { text: "The strength of a nation derives from the integrity of the home.", author: "Confucius" },
+  { text: "Education is not preparation for life; education is life itself.", author: "John Dewey" },
+  { text: "Take up one idea. Make that one idea your life — think of it, dream of it, live on that idea. Let the brain, muscles, nerves, every part of your body be full of that idea.", author: "Swami Vivekananda" },
+  { text: "The beautiful thing about learning is that no one can take it away from you.", author: "B.B. King" },
+  { text: "You are never too old to set another goal or to dream a new dream.", author: "C.S. Lewis" },
+  { text: "It always seems impossible until it's done.", author: "Nelson Mandela" },
+  { text: "He who learns but does not think, is lost. He who thinks but does not learn is in great danger.", author: "Confucius" },
+  { text: "The more that you read, the more things you will know.", author: "Dr. Seuss" },
+  { text: "Learning is a treasure that will follow its owner everywhere.", author: "Chinese Proverb" },
+];
+
+function getQuoteOfDay() {
+  const dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
+  return HKN_QUOTES[dayOfYear % HKN_QUOTES.length];
+}
+
+function renderIntakeActiveWelcome(student) {
+  const firstName = student.firstName || 'there';
+  const adminMsg  = DB.getSettings().activeStudentMessage || '';
+  const quote     = getQuoteOfDay();
+
+  const messageHTML = adminMsg ? `
+    <div style="background:var(--olive-pale); border-left:4px solid var(--olive); border-radius:var(--radius-md);
+                padding:16px 20px; margin:20px 0; text-align:left;">
+      <div style="font-size:11px; font-weight:700; color:var(--olive); text-transform:uppercase;
+                  letter-spacing:0.06em; margin-bottom:8px;">📢 Message from Hindi Ki Neev</div>
+      <div style="font-size:14px; color:var(--ink); line-height:1.8; white-space:pre-wrap;">${escHtml(adminMsg)}</div>
+    </div>` : `
+    <div style="background:#FFF8E7; border-left:4px solid #D4A017; border-radius:var(--radius-md);
+                padding:16px 20px; margin:20px 0; text-align:left; position:relative;">
+      <div style="font-size:11px; font-weight:700; color:#8B6914; text-transform:uppercase;
+                  letter-spacing:0.06em; margin-bottom:8px;">✨ Quote of the Day</div>
+      <div style="font-size:15px; color:#5C4A1E; line-height:1.8; font-style:italic;">
+        "${escHtml(quote.text)}"
+      </div>
+      <div style="font-size:12px; color:#8B6914; margin-top:8px; font-weight:600;">
+        — ${escHtml(quote.author)}
+      </div>
+    </div>`;
+
+  document.getElementById('intake-step-1c').innerHTML = `
+    <div style="text-align:center; padding:10px 0 20px;">
+      <div style="font-size:36px; margin-bottom:10px;">🙏</div>
+      <div style="font-family:var(--serif); font-size:22px; font-weight:600; color:var(--olive); margin-bottom:6px;">
+        Welcome back, ${escHtml(firstName)}!
+      </div>
+      <div style="font-size:13px; color:var(--ink-light); margin-bottom:4px;">
+        We're happy to see you at Hindi Ki Neev.
+      </div>
+      ${messageHTML}
+      <button class="btn btn-primary" style="margin-top:8px;"
+        onclick="intakeShowStudentInfo()">Continue →</button>
+    </div>
+  `;
+}
+
+function intakeShowStudentInfo() {
+  const found = intakeState.student;
+  if (!found) return;
+  // Replace welcome content with student info view in same step
+  document.getElementById('intake-step-1c').innerHTML = `
+    <div id="intake-info-view"></div>
+    <div style="margin-top:16px; text-align:center;">
+      <a href="https://www.hindikineev.org" class="btn btn-primary" style="display:inline-block; text-decoration:none;">Done →</a>
+    </div>
+  `;
+  renderIntakeInfoView(found, getBestSession());
 }
 
 function renderIntakeContactSchool(student, reason) {
