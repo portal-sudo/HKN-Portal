@@ -6713,9 +6713,11 @@ function _intakeLookupCore() {
 
       // ── Case 1: Active ────────────────────────────────────────
       if (found.status === 'Active') {
-        intakeState.student    = found;
-        intakeState.isNew      = false;
-        intakeState.isInterest = false;
+        intakeState.student              = found;
+        intakeState.isNew                = false;
+        intakeState.isInterest           = false;
+        intakeState.bestSession          = getBestSession();
+        intakeState.activeStudentMessage = result.settings?.activeStudentMessage || DB.getSettings().activeStudentMessage || '';
         renderIntakeActiveWelcome(found);
         intakeGoStep('1c');
         return;
@@ -6813,7 +6815,7 @@ function getQuoteOfDay() {
 
 function renderIntakeActiveWelcome(student) {
   const firstName = student.firstName || 'there';
-  const adminMsg  = DB.getSettings().activeStudentMessage || '';
+  const adminMsg  = intakeState.activeStudentMessage || '';
   const quote     = getQuoteOfDay();
 
   const messageHTML = adminMsg ? `
@@ -6854,14 +6856,13 @@ function renderIntakeActiveWelcome(student) {
 function intakeShowStudentInfo() {
   const found = intakeState.student;
   if (!found) return;
-  // Replace welcome content with student info view in same step
   document.getElementById('intake-step-1c').innerHTML = `
     <div id="intake-info-view"></div>
     <div style="margin-top:16px; text-align:center;">
       <a href="https://www.hindikineev.org" class="btn btn-primary" style="display:inline-block; text-decoration:none;">Done →</a>
     </div>
   `;
-  renderIntakeInfoView(found, getBestSession());
+  renderIntakeInfoView(found, intakeState.bestSession || null);
 }
 
 function renderIntakeContactSchool(student, reason) {
