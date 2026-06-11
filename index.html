@@ -2609,6 +2609,17 @@ function renderStudentTable() {
   }).join('');
 }
 
+function getScoreLabels(bookLevel) {
+  switch (bookLevel) {
+    case 'Book 1': return ['Speaking', 'Reading', 'Writing'];
+    case 'Book 2': return ['Speaking', 'Reading', 'Writing'];
+    case 'Book 3': return ['Comprehension', 'Grammar', 'Composition'];
+    case 'Book 4': return ['Comprehension', 'Grammar', 'Composition'];
+    case 'Book 5': return ['Comprehension', 'Grammar', 'Composition'];
+    default:       return ['Speaking', 'Reading', 'Writing'];
+  }
+}
+
 function scoreBar(val) {
   if (val === undefined || val === null || val === '') return '—';
   const filled = parseInt(val) || 0;
@@ -2713,24 +2724,18 @@ function openStudentModal(studentId) {
         <div style="margin-bottom:14px;">
           <label class="form-label">Ability scores (0–5)</label>
           <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-top:8px;">
-            <div>
-              <div style="font-size:12px; color:var(--ink-light); margin-bottom:6px;">Speaking</div>
-              <div class="score-picker" id="sp-speaking-${sess.name.replace(/[^a-z0-9]/gi,'_')}">
-                ${[0,1,2,3,4,5].map(n=>`<div class="score-dot ${(sd.speakingScore||0)===n?'active':''}" onclick="${isAdmin||teacherCanEdit?`setScore('speaking','${sess.name}',${n})`:''};">${n}</div>`).join('')}
-              </div>
-            </div>
-            <div>
-              <div style="font-size:12px; color:var(--ink-light); margin-bottom:6px;">Reading</div>
-              <div class="score-picker" id="sp-reading-${sess.name.replace(/[^a-z0-9]/gi,'_')}">
-                ${[0,1,2,3,4,5].map(n=>`<div class="score-dot ${(sd.readingScore||0)===n?'active':''}" onclick="${isAdmin||teacherCanEdit?`setScore('reading','${sess.name}',${n})`:''};">${n}</div>`).join('')}
-              </div>
-            </div>
-            <div>
-              <div style="font-size:12px; color:var(--ink-light); margin-bottom:6px;">Writing</div>
-              <div class="score-picker" id="sp-writing-${sess.name.replace(/[^a-z0-9]/gi,'_')}">
-                ${[0,1,2,3,4,5].map(n=>`<div class="score-dot ${(sd.writingScore||0)===n?'active':''}" onclick="${isAdmin||teacherCanEdit?`setScore('writing','${sess.name}',${n})`:''};">${n}</div>`).join('')}
-              </div>
-            </div>
+            ${(() => {
+              const labels = getScoreLabels(sd.bookLevel || '');
+              const fields = ['speakingScore', 'readingScore', 'writingScore'];
+              const types  = ['speaking', 'reading', 'writing'];
+              return labels.map((lbl, i) => `
+                <div>
+                  <div style="font-size:12px; color:var(--ink-light); margin-bottom:6px;">${lbl}</div>
+                  <div class="score-picker" id="sp-${types[i]}-${sess.name.replace(/[^a-z0-9]/gi,'_')}">
+                    ${[0,1,2,3,4,5].map(n=>`<div class="score-dot ${(sd[fields[i]]||0)===n?'active':''}" onclick="${isAdmin||teacherCanEdit?`setScore('${types[i]}','${sess.name}',${n})`:''};">${n}</div>`).join('')}
+                  </div>
+                </div>`).join('');
+            })()}
           </div>
         </div>
         <div class="form-group">
