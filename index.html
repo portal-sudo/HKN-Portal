@@ -1766,9 +1766,11 @@ function loadAppShell(validateTeacher = false) {
   document.getElementById('nav-user-email').textContent = currentUser.email;
   document.getElementById('nav-role-label').textContent = currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1);
   buildSidebar();
-  seedAttributesIfEmpty();
-  seedStudentsIfEmpty();
-  migrateNameCasing();
+  // NOTE: seeding intentionally NOT done here, before Drive load — seeding writes
+  // default/placeholder data into localStorage and triggers DriveSync.scheduleSave(),
+  // which can race with DriveSync.load() below and corrupt real Drive data on a
+  // fresh device/session where localStorage starts empty. Seeding only happens
+  // after load() completes successfully, further down.
   // Clear DriveSync-specific token — DriveSync.load() will reuse GMAIL.accessToken
   // which was set during Google sign-in and already covers drive scope
   DriveSync.driveToken = null;
@@ -1776,6 +1778,8 @@ function loadAppShell(validateTeacher = false) {
   // Load data from Google Drive, then navigate
   DriveSync.load().then(() => {
     seedAttributesIfEmpty();
+    seedStudentsIfEmpty();
+    migrateNameCasing();
     // Check staff access — teachers and viewers blocked if staffEnabled is false
     if (['teacher','viewer'].includes(currentUser?.role)) {
       const staffEnabled = DB.getSettings().staffEnabled !== false;
