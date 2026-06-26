@@ -5252,9 +5252,67 @@ Cancel to sync first (☁️ button), then save again.`
           body: JSON.stringify(data),
         }
       );
+
+      // ── Verification step ──────────────────────────────────
+      // Immediately re-fetch the file we just wrote and confirm the ENTIRE
+      // payload persisted correctly — not just one field or one status.
+      // Prevents silent data loss of any kind going undetected (see 2026-06-26 incident).
+      let verified = false;
+      let verifyError = null;
+      try {
+        const verifyRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
+          { headers: { Authorization: 'Bearer ' + token } }
+        );
+        if (verifyRes.ok) {
+          const verifyData = await verifyRes.json();
+          const sentJSON     = JSON.stringify(data);
+          const verifiedJSON = JSON.stringify(verifyData);
+          verified = sentJSON === verifiedJSON;
+
+          if (!verified) {
+            // Build a useful diff summary across every top-level collection,
+            // not just students — so any kind of mismatch is reported clearly.
+            const diffs = [];
+            const keys = new Set([...Object.keys(data), ...Object.keys(verifyData)]);
+            keys.forEach(key => {
+              if (key === 'exported') return; // timestamp always differs, not meaningful
+              const sentVal     = JSON.stringify(data[key]);
+              const verifiedVal = JSON.stringify(verifyData[key]);
+              if (sentVal !== verifiedVal) {
+                const sentLen     = Array.isArray(data[key]) ? data[key].length : '(object)';
+                const verifiedLen = Array.isArray(verifyData[key]) ? verifyData[key].length : '(object)';
+                diffs.push(`• ${key}: sent ${sentLen}, Drive shows ${verifiedLen} — content differs`);
+              }
+            });
+            verifyError = diffs.length > 0
+              ? diffs.join('\n')
+              : 'Content differs but could not isolate which field — full mismatch.';
+          }
+        } else {
+          verifyError = 'Could not re-read file from Drive (HTTP ' + verifyRes.status + ')';
+        }
+      } catch(ve) {
+        verifyError = 'Verification check failed: ' + ve.message;
+      }
+
+      if (!verified) {
+        this.setStatus('error');
+        alert(
+          '⚠️ SAVE NOT VERIFIED\n\n' +
+          'Your last change may not have been saved correctly to the shared database.\n\n' +
+          (verifyError || '') +
+          '\n\nPlease do NOT continue working. Click the ☁️ sync button to reload, ' +
+          'check whether your change is present, and try saving again. ' +
+          'If this keeps happening, stop and contact support before proceeding further.'
+        );
+        return;
+      }
+      // ── End verification step ──────────────────────────────
+
       this.lastSynced = new Date();
       this.setStatus('synced');
-      console.log('DriveSync: full save to Drive');
+      console.log('DriveSync: full save to Drive (verified)');
     } catch(e) {
       console.warn('DriveSync.save failed:', e.message);
       this.setStatus('error');
