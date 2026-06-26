@@ -5177,7 +5177,23 @@ const DriveSync = {
         DB.restoreBackup(data);
         console.log('DriveSync: loaded from Drive');
       }
-      this.lastSynced = new Date();
+      // Use Drive's own server-side modifiedTime (not this browser's local clock)
+      // so it's directly comparable to the modifiedTime checked during save() —
+      // avoids any client/server clock-drift false positives.
+      try {
+        const metaRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}?fields=modifiedTime&supportsAllDrives=true`,
+          { headers: { Authorization: 'Bearer ' + token } }
+        );
+        if (metaRes.ok) {
+          const meta = await metaRes.json();
+          this.lastSynced = new Date(meta.modifiedTime);
+        } else {
+          this.lastSynced = new Date();
+        }
+      } catch(_) {
+        this.lastSynced = new Date();
+      }
       this.setStatus('synced');
       this.loading = false;
     } catch(e) {
@@ -5260,6 +5276,7 @@ Cancel to sync first (☁️ button), then save again.`
       // Prevents silent data loss of any kind going undetected (see 2026-06-26 incident).
       let verified = false;
       let verifyError = null;
+      let driveModifiedTime = null;
       try {
         const verifyRes = await fetch(
           `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
@@ -5309,9 +5326,24 @@ Cancel to sync first (☁️ button), then save again.`
         );
         return;
       }
+
+      // Fetch Drive's own server-side modifiedTime for this save, so the NEXT
+      // save's conflict-check compares server-clock to server-clock — never
+      // mixing in this browser's local clock, which eliminates clock-drift
+      // false positives in the overwrite-warning check above.
+      try {
+        const metaRes2 = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}?fields=modifiedTime&supportsAllDrives=true`,
+          { headers: { Authorization: 'Bearer ' + token } }
+        );
+        if (metaRes2.ok) {
+          const meta2 = await metaRes2.json();
+          driveModifiedTime = new Date(meta2.modifiedTime);
+        }
+      } catch(_) { /* fall through to local clock below if this fails */ }
       // ── End verification step ──────────────────────────────
 
-      this.lastSynced = new Date();
+      this.lastSynced = driveModifiedTime || new Date();
       this.setStatus('synced');
       console.log('DriveSync: full save to Drive (verified)');
     } catch(e) {
