@@ -5093,16 +5093,26 @@ const DriveSync = {
   // ── Status indicator in nav bar ──
   setStatus(state) {
     const el = document.getElementById('drive-sync-status');
-    if (!el) return;
-    const states = {
-      syncing: { text: '☁️ Syncing…',  color: '#FFD080' },
-      synced:  { text: '☁️ Synced ✓',  color: '#7FECB0' },
-      error:   { text: '☁️ Sync error ⚠', color: '#FF9090' },
-      offline: { text: '☁️ Offline',   color: 'rgba(255,255,255,0.5)' },
-    };
-    const s = states[state] || states.offline;
-    el.textContent = s.text;
-    el.style.color = s.color;
+    if (el) {
+      const states = {
+        syncing: { text: '☁️ Syncing…',  color: '#FFD080' },
+        synced:  { text: '☁️ Synced ✓',  color: '#7FECB0' },
+        error:   { text: '☁️ Sync error ⚠', color: '#FF9090' },
+        offline: { text: '☁️ Offline',   color: 'rgba(255,255,255,0.5)' },
+      };
+      const s = states[state] || states.offline;
+      el.textContent = s.text;
+      el.style.color = s.color;
+    }
+    // Error is easy to miss as just a small status-bar color change — make it
+    // loud and unmissable, and tell the user exactly what to do about it.
+    if (state === 'error' && typeof showToast === 'function') {
+      showToast(
+        '⚠️ Sync error — your last change may NOT be saved. Click ☁️ to refresh, then check and try again.',
+        'error',
+        15000
+      );
+    }
   },
 
   // ── Get a valid access token for Drive (silent — no popup) ──
@@ -7614,12 +7624,12 @@ function showConfirm(icon, title, msg, okLabel, okClass, onOk) {
   document.getElementById('confirm-ok-btn').onclick = () => { overlay.remove(); onOk(); };
 }
 
-function showToast(msg, type = 'info') {
+function showToast(msg, type = 'info', durationMs = 3000) {
   const t = document.createElement('div');
   t.className = `toast ${type}`;
   t.textContent = msg;
   document.getElementById('toast-container').appendChild(t);
-  setTimeout(() => { t.style.animation = 'toastOut 0.25s ease forwards'; setTimeout(() => t.remove(), 260); }, 3000);
+  setTimeout(() => { t.style.animation = 'toastOut 0.25s ease forwards'; setTimeout(() => t.remove(), 260); }, durationMs);
 }
 
 // ── UTILS ────────────────────────────────────────────────────
