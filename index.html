@@ -696,7 +696,7 @@ const SessionEngine = {
   },
   getUnderwaySession() {
     // Returns the session currently being taught (today within its classDates range),
-    // falling back to the most recently started session.
+    // falling back to enrollment-open session, then most recently started session.
     const sessions = DB.getSessions();
     const today = new Date().toISOString().slice(0,10);
     const underway = sessions.find(s => {
@@ -705,6 +705,11 @@ const SessionEngine = {
       return today >= dates[0] && today <= dates[dates.length - 1];
     });
     if (underway) return underway;
+    // Prefer enrollment-open session over most-recently-started, since during
+    // the gap between sessions (e.g. Spring ended, Fall not yet started) the
+    // enrollment-open session is the most relevant context for admin work.
+    const open = sessions.find(s => s.enrollmentOpen);
+    if (open) return open;
     // Fall back to most recent session that has already started
     const started = sessions.filter(s => (s.classDates||[]).length && s.classDates[0] <= today);
     return started.length ? started[started.length - 1] : sessions[sessions.length - 1];
