@@ -5,317 +5,511 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>HKN Parent Guide — Hindi Ki Neev</title>
   <style>
-    :root {
-      --olive:       #3D5A3E;
-      --olive-light: #6B8F71;
-      --olive-pale:  #EFF5EF;
-      --orange:      #E8824A;
-      --ink:         #1A1A12;
-      --ink-light:   #6B6B52;
-      --cream:       #FAF6EF;
-      --border:      #D4C9A8;
-    }
-
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: 'Segoe UI', Arial, sans-serif;
-      font-size: 15px;
-      line-height: 1.7;
-      color: var(--ink);
-      background: var(--cream);
-    }
-
-    .header {
-      background: var(--olive);
-      color: white;
-      text-align: center;
-      padding: 36px 24px 28px;
-    }
-
-    .header h1 {
-      font-size: 32px;
-      font-weight: 700;
-      color: white;
-      border: none;
-      margin: 0 0 6px 0;
+      font-family: 'Georgia', serif;
+      background: #f9f6f0;
+      color: #2c2c2c;
+      line-height: 1.8;
       padding: 0;
     }
 
-    .header .deva {
-      font-size: 18px;
-      opacity: 0.85;
-      margin-bottom: 8px;
+    .header {
+      background: #2d4a2d;
+      color: white;
+      padding: 32px 24px 24px;
+      text-align: center;
+    }
+
+    .header h1 {
+      font-size: 26px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      letter-spacing: 0.02em;
     }
 
     .header .subtitle {
       font-size: 13px;
-      opacity: 0.7;
+      opacity: 0.75;
       font-style: italic;
+    }
+
+    .header .tag {
+      display: inline-block;
+      background: rgba(255,255,255,0.15);
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: 12px;
+      margin-top: 10px;
+      letter-spacing: 0.04em;
     }
 
     .container {
-      max-width: 800px;
+      max-width: 780px;
       margin: 0 auto;
-      padding: 32px 24px 60px;
+      padding: 32px 20px 60px;
     }
 
-    h1 {
-      font-size: 20px;
-      color: var(--olive);
-      font-weight: 700;
-      margin: 32px 0 12px;
-      padding-bottom: 6px;
-      border-bottom: 2px solid var(--border);
-    }
-
-    h2 {
-      font-size: 16px;
-      color: var(--olive-light);
-      font-weight: 600;
-      margin: 20px 0 8px;
-    }
-
-    p {
-      margin-bottom: 10px;
-    }
-
-    .qa {
+    .toc {
       background: white;
-      border-radius: 8px;
-      border-left: 4px solid var(--olive-light);
-      padding: 12px 16px;
-      margin-bottom: 10px;
+      border: 1px solid #d4c9b0;
+      border-radius: 10px;
+      padding: 20px 24px;
+      margin-bottom: 32px;
     }
 
-    .qa .q {
-      font-weight: 600;
-      font-style: italic;
-      color: var(--olive);
-      margin-bottom: 4px;
-      font-size: 14px;
+    .toc h2 {
+      font-size: 13px;
+      font-weight: 700;
+      color: #5a7a3a;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
     }
 
-    .qa .a {
-      color: var(--ink);
-      margin: 0;
-      font-size: 14px;
+    .toc ol {
+      padding-left: 20px;
     }
 
-    ul {
-      margin: 8px 0 14px 20px;
-    }
-
-    li {
+    .toc li {
       margin-bottom: 6px;
-      font-size: 14px;
     }
 
-    .info-box {
-      background: var(--olive-pale);
-      border: 1px solid var(--olive-light);
-      border-left: 4px solid var(--olive);
-      border-radius: 8px;
-      padding: 14px 18px;
-      margin: 16px 0;
+    .toc a {
+      color: #2d4a2d;
+      text-decoration: none;
       font-size: 14px;
-      color: var(--olive);
-      font-style: italic;
+      font-weight: 600;
+    }
+
+    .toc a:hover { text-decoration: underline; color: #c85a00; }
+
+    .section {
+      background: white;
+      border-radius: 10px;
+      border: 1px solid #e5ddd0;
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+
+    .section-header {
+      background: #f0ede6;
+      padding: 14px 20px;
+      border-bottom: 1px solid #e5ddd0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .section-number {
+      background: #2d4a2d;
+      color: white;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .section-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #2d4a2d;
+    }
+
+    .section-body {
+      padding: 20px 24px;
+    }
+
+    .qa { margin-bottom: 20px; }
+    .qa:last-child { margin-bottom: 0; }
+
+    .question {
+      font-weight: 700;
+      color: #2d4a2d;
+      font-size: 14px;
+      margin-bottom: 6px;
+    }
+
+    .answer {
+      font-size: 14px;
+      color: #444;
+      line-height: 1.8;
+    }
+
+    .answer ul {
+      padding-left: 20px;
+      margin-top: 6px;
+    }
+
+    .answer li { margin-bottom: 4px; }
+
+    .highlight-box {
+      background: #f0f7e8;
+      border-left: 4px solid #5a7a3a;
+      border-radius: 0 8px 8px 0;
+      padding: 14px 18px;
+      margin-top: 12px;
+      font-size: 13px;
+      color: #3a5a2a;
+      line-height: 1.7;
+    }
+
+    .portal-box {
+      background: #fff8f0;
+      border: 1.5px solid #e8a060;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-top: 12px;
+      font-size: 14px;
+      color: #5a3010;
+    }
+
+    .portal-box a {
+      color: #c85a00;
+      font-weight: 700;
     }
 
     .footer {
       text-align: center;
-      padding: 20px;
       font-size: 12px;
-      color: var(--ink-light);
-      border-top: 1px solid var(--border);
+      color: #999;
       margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid #e5ddd0;
     }
 
-    a { color: var(--orange); }
-
     @media (max-width: 600px) {
-      .header h1 { font-size: 24px; }
-      .container { padding: 20px 16px 40px; }
-      h1 { font-size: 18px; }
+      .section-body { padding: 16px; }
+      .container { padding: 20px 12px 40px; }
     }
   </style>
 </head>
 <body>
 
-  <div class="header">
-    <h1>Hindi Ki Neev</h1>
-    <div class="deva">&#x939;&#x93F;&#x928;&#x94D;&#x926;&#x940; &#x915;&#x940; &#x928;&#x940;&#x902;&#x935;</div>
-    <div class="subtitle">School Policies &amp; Parent Guide &middot; 2026&ndash;27</div>
+<div class="header">
+  <h1>📖 Parent Guide</h1>
+  <div class="subtitle">Hindi Ki Neev — हिन्दी की नींव</div>
+  <div class="tag">School Policies &amp; Parent Guide · 2026–27</div>
+</div>
+
+<div class="container">
+
+  <!-- Table of Contents -->
+  <div class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#about">About Hindi Ki Neev</a></li>
+      <li><a href="#enrollment">Enrollment &amp; Fees</a></li>
+      <li><a href="#classes">Classes &amp; Schedule</a></li>
+      <li><a href="#curriculum">Curriculum &amp; Levels</a></li>
+      <li><a href="#homework">Homework &amp; Progress</a></li>
+      <li><a href="#responsibilities">Parent Responsibilities</a></li>
+      <li><a href="#portal">Checking Your Child's Progress Online</a></li>
+    </ol>
   </div>
 
-  <div class="container">
-
-    <div class="info-box">
-      &#127760; Parent Portal:
-      <a href="https://portal.hindikineev.org/?intake=1" style="color:var(--orange);">
-        portal.hindikineev.org
-      </a>
-      &nbsp;&nbsp;|&nbsp;&nbsp;
-      &#9993;&#65039;
-      <a href="mailto:info@hindikineev.org" style="color:var(--orange);">
-        info@hindikineev.org
-      </a>
-      &nbsp;&nbsp;|&nbsp;&nbsp;
-      &#127757;
-      <a href="https://www.hindikineev.org" style="color:var(--orange);">
-        hindikineev.org
-      </a>
+  <!-- Section 1 -->
+  <div class="section" id="about">
+    <div class="section-header">
+      <div class="section-number">1</div>
+      <div class="section-title">About Hindi Ki Neev</div>
     </div>
-
-        <p>Hindi Ki Neev</p>
-        <p>हिन्दी की नींव</p>
-        <p>School Policies &amp; Parent Guide · 2026–27</p>
-        <h1>1. About Hindi Ki Neev</h1>
-        <div class="qa">
-          <p class="q">How long has Hindi Ki Neev been in operation?</p>
-          <p class="a">HKN was founded in 2021, though our curriculum has been in use since 2016, starting at the Shiv-Durga Temple in Sunnyvale. Since our beginnings, we have taught around 500 students.</p>
+    <div class="section-body">
+      <div class="qa">
+        <div class="question">What is Hindi Ki Neev?</div>
+        <div class="answer">
+          Hindi Ki Neev (HKN) is a community Hindi language school serving families in the Bay Area. 
+          Our mission is to help children of Indian origin develop a strong foundation in Hindi — 
+          reading, writing, and speaking — in a nurturing, structured environment.
         </div>
-        <div class="qa">
-          <p class="q">Is HKN a nonprofit?</p>
-          <p class="a">Yes, Hindi Ki Neev is incorporated as a nonprofit organization under Section 501(c)(3), dedicated to teaching Hindi to children between the ages of 5 and 14 in the San Francisco Bay Area. Please note that enrollment fees are not a donation — they cover Hindi language instruction services and are not tax-deductible.</p>
+      </div>
+      <div class="qa">
+        <div class="question">Who teaches at HKN?</div>
+        <div class="answer">
+          Our teachers are experienced, passionate educators who are native or fluent Hindi speakers. 
+          Each class is led by a dedicated teacher who guides students through our structured curriculum.
         </div>
-        <div class="qa">
-          <p class="q">What is the school&#x27;s mission?</p>
-          <p class="a">Our mission is to teach Hindi as a second language to children and connect them with India&#x27;s rich social, cultural, and traditional heritage. We serve students from all over the Bay Area, with a majority from Campbell, Cupertino, San Jose, Fremont, Santa Clara, Milpitas, Saratoga and Sunnyvale.</p>
+      </div>
+      <div class="qa">
+        <div class="question">How long has HKN been operating?</div>
+        <div class="answer">
+          Hindi Ki Neev has been serving the Bay Area community for over a decade, helping hundreds 
+          of children build a lifelong connection to the Hindi language and Indian culture.
         </div>
-        <h1>2. Enrollment</h1>
-        <div class="qa">
-          <p class="q">Is my child eligible to enroll?</p>
-          <p class="a">Your child is eligible if they are at least 5 years old on August 1 of the year you are registering, and entering kindergarten or above. Children up to age 14 may enroll.</p>
-        </div>
-        <div class="qa">
-          <p class="q">When does enrollment begin?</p>
-          <p class="a">New students are admitted only in the Fall. If you have previously submitted an interest form on our website, you will receive an email inviting you to complete enrollment and pay fees. Only students on the Fall session roster are admitted to Winter and Spring sessions.</p>
-        </div>
-        <div class="qa">
-          <p class="q">What is the enrollment process?</p>
-          <p class="a">Once your interest form is submitted, we will verify eligibility and send you an invitation to complete the Enrollment Form. After we receive your completed form and verify payment via Zelle, we will assign your child a teacher and class time and send a confirmation email. You can also check your child&#x27;s status through our school portal, please see instructions below.</p>
-        </div>
-        <div class="qa">
-          <p class="q">What are the fees and what do they cover?</p>
-          <p class="a">The annual enrollment fee covers tuition and books for the entire academic year (Fall, Winter, and Spring sessions). HKN is a nonprofit and aims to keep fees as low as possible. Our teachers are volunteers, but we must cover facility rental, curriculum, administrative, arts supply, and publishing costs.</p>
-        </div>
-        <div class="qa">
-          <p class="q">Do you offer a free trial?</p>
-          <p class="a">We do not offer free trials. However, if after the first class you decide not to continue for any reason, you may request cancellation within 24 hours and receive a full refund minus a processing fee. Refunds cannot be issued after 24 hours from the first class. This allows us to offer admission to another interested child on our waitlist.</p>
-        </div>
-        <div class="qa">
-          <p class="q">Can my child start at a higher level?</p>
-          <p class="a">Possibly. Please describe your child&#x27;s Hindi background in the interest form, and send an email to info@hindikineev.org so we can discuss the appropriate placement. From experience, students who have not learned Hindi in a formal environment often have gaps that make higher levels challenging, so we take placement decisions carefully to ensure your child&#x27;s success.</p>
-        </div>
-        <div class="qa">
-          <p class="q">My child can speak Hindi but cannot read or write it — what level is recommended?</p>
-          <p class="a">Students who can speak Hindi but have no reading or writing experience will start at Beginner-1. Reading and writing are foundational to our curriculum and your child will progress quickly given their speaking head start.</p>
-        </div>
-        <h1>3. Classes</h1>
-        <div class="qa">
-          <p class="q">What is the class schedule?</p>
-          <p class="a">Classes typically run from September to May each academic year, divided into three sessions of 10 classes each — Fall, Winter, and Spring — with holiday breaks. Each class is about one hour long, held on Saturdays between 9:00 AM and 1:00 PM. Intermediate and Advanced classes are typically scheduled earlier; Beginner classes start later.</p>
-        </div>
-        <div class="qa">
-          <p class="q">Where are classes held?</p>
-          <p class="a">Classes are currently held at Little Champs, 5178 Moorpark Ave, San Jose, CA 95129 (West San Jose area). All classes are in person.</p>
-        </div>
-        <div class="qa">
-          <p class="q">Is there any flexibility on timings or online options?</p>
-          <p class="a">Class times are fixed. Occasionally a replacement class may be offered online, but this is rare. If your child misses a class, there are no separately scheduled make-up classes — students catch up with teacher guidance.</p>
-        </div>
-        <div class="qa">
-          <p class="q">What is the class size?</p>
-          <p class="a">Classes typically range from 5 to 15 students, with a maximum of 20 students per class.</p>
-        </div>
-        <div class="qa">
-          <p class="q">Can parents observe the class?</p>
-          <p class="a">We ask that parents wait outside during class. Research shows children learn languages more freely without parents present. At the teacher&#x27;s discretion, parents may be permitted to attend if the child needs help. Please check with your child&#x27;s teacher. We advise parents of new enrollees to remain nearby in case their child needs extra reassurance.</p>
-        </div>
-        <div class="qa">
-          <p class="q">What if my child needs to be picked up late?</p>
-          <p class="a">We request prompt on time pickups after class ends. We ask that you respect the time of our teachers and the safety of our students.</p>
-        </div>
-        <h1>4. Curriculum &amp; Levels</h1>
-        <div class="qa">
-          <p class="q">What curriculum and books are used?</p>
-          <p class="a">Our curriculum is based on &quot;Hindi Ki Duniya,&quot; a program developed at the Rishi Valley School by the Krishnamurthy Foundation of India. It is specially designed for non-native Hindi speakers and has proven highly effective in the US. All books are included in your enrollment fee.</p>
-        </div>
-        <div class="qa">
-          <p class="q">How many levels does the program have?</p>
-          <p class="a">HKN offers 9 levels across three stages — Beginner (Years 1–3), Intermediate (Years 1–4), and Advanced (Years 1–2). Please visit the Curriculum section at hindikineev.org for full details.</p>
-        </div>
-        <div class="qa">
-          <p class="q">What will my child learn in their first year?</p>
-          <p class="a">First-year students focus on the Hindi alphabet, colors, numbers, poems, and introductory conversation — covering reading, writing, speaking, and listening equally.</p>
-        </div>
-        <div class="qa">
-          <p class="q">My child has no Hindi knowledge at all — is that okay?</p>
-          <p class="a">Absolutely. Our program is designed from the very beginning for students with no prior Hindi knowledge.</p>
-        </div>
-        <div class="qa">
-          <p class="q">How can a first grader and a fifth grader be in the same class?</p>
-          <p class="a">We place students by Hindi level, not school grade. A child&#x27;s age does not determine their Hindi level, and our teachers have materials and strategies to make learning engaging and appropriately challenging for each student individually.</p>
-        </div>
-        <div class="qa">
-          <p class="q">What are the benefits of learning Hindi?</p>
-          <p class="a">Beyond cultural connection, research shows that bilingual children develop superior problem-solving skills, enhanced creativity, stronger memory, better listening skills, and improved academic test scores. Learning to write in a second language is particularly beneficial for brain development.</p>
-        </div>
-        <h1>5. Homework &amp; Progress</h1>
-        <div class="qa">
-          <p class="q">How much homework is assigned?</p>
-          <p class="a">Teachers assign approximately 30–60 minutes of homework per week, adjusted for the student&#x27;s level. Beginner-level homework is primarily oral — reciting poems, listening to audio files, and practicing speaking for 10 minutes. Flashcard practice and workbook activities are also assigned. We do not overload students with written homework, especially at beginner levels.</p>
-        </div>
-        <div class="qa">
-          <p class="q">What happens if my child misses too many classes?</p>
-          <p class="a">If your child misses 50% or more of classes in a session, we may retain them at the same level for the following year. Consistent attendance is important — students who miss too many classes struggle to keep pace with the material, which can discourage their progress.</p>
-        </div>
-        <div class="qa">
-          <p class="q">How can we support our child&#x27;s learning at home?</p>
-          <p class="a">We encourage parents to: speak Hindi at home as much as possible, supervise weekly homework especially for younger children, and play the audio poem files sent by the teacher regularly. Your involvement strengthens your child&#x27;s progress and builds a wonderful connection between home and school.</p>
-        </div>
-        <div class="qa">
-          <p class="q">What if my child loses or damages their book?</p>
-          <p class="a">Please email info@hindikineev.org to request a replacement book; a replacement fee will be charged.</p>
-        </div>
-        <h1>6. Parent Responsibilities</h1>
-        <p>We ask that parents help set their child up for success each week:</p>
-        <ul>
-          <li>Ensure your child brings all Hindi materials to every class: textbook, workbook, 2 sharpened pencils, an eraser, a small box of crayons, flashcards, and a notebook. Keep these organized in a dedicated Hindi bag.</li>
-          <li>Students are encouraged to bring a water bottle.</li>
-          <li>Drop off and pick up your child on time.</li>
-          <li>You will be added to the teacher&#x27;s WhatsApp group for general updates and school news.</li>
-          <li>New parents: please attend Orientation Day (you will be notified by email) to meet the teacher and collect your child&#x27;s books.</li>
-          <li>Parents of new Beginner students: please stay in the proximity of Little Champs during the first few classes in case your child needs reassurance.</li>
-          <li>Parent volunteers are always welcome. Our teachers occasionally need help with activities — please offer your time and support when you can.</li>
-        </ul>
-        <h1>7. Checking Your Child&#x27;s Progress Online</h1>
-        <p>Hindi Ki Neev now has a school portal where parents can view their child&#x27;s enrollment status, attendance record, and teacher notes at any time.</p>
-        <h2>How to look up your child&#x27;s record</h2>
-        <p>No account or password is needed. Simply visit the portal link above, then enter the following four details:</p>
-        <ul>
-          <li>Parent or guardian name</li>
-          <li>Parent email address (the one registered with HKN)</li>
-          <li>Student first and last name</li>
-          <li>Student date of birth</li>
-        </ul>
-        <p>Once your record is found, you will see:</p>
-        <ul>
-          <li>Your child&#x27;s current enrollment status</li>
-          <li>Assigned teacher and class time</li>
-          <li>Class level and book</li>
-          <li>Attendance record for the current session</li>
-          <li>Notes left by your child&#x27;s teacher</li>
-        </ul>
-        <h2>Teacher notes as a communication channel</h2>
-        <p>Your child&#x27;s teacher will leave notes on the portal after class as a lightweight weekly update on your child&#x27;s progress. A note might say something like &quot;Did well with reading today — needs more practice with verb conjugations.&quot; This is a direct window into your child&#x27;s learning.</p>
-
-    <div class="footer">
-      Hindi Ki Neev &middot; info@hindikineev.org &middot; hindikineev.org &middot; portal.hindikineev.org
+      </div>
     </div>
-
   </div>
+
+  <!-- Section 2 -->
+  <div class="section" id="enrollment">
+    <div class="section-header">
+      <div class="section-number">2</div>
+      <div class="section-title">Enrollment &amp; Fees</div>
+    </div>
+    <div class="section-body">
+      <div class="qa">
+        <div class="question">How do I enroll my child?</div>
+        <div class="answer">
+          Enrollment is managed through our online Student Portal. New families register their interest, 
+          and returning families re-enroll each year. Once a spot is confirmed, you will receive an 
+          invitation to complete enrollment and submit payment.
+        </div>
+      </div>
+      <div class="qa">
+        <div class="question">What are the fees?</div>
+        <div class="answer">
+          The annual enrollment fee covers all three sessions (Fall, Winter, and Spring). 
+          Please check the portal or contact us at 
+          <a href="mailto:info@hindikineev.org" style="color:#c85a00;">info@hindikineev.org</a> 
+          for the current fee amount.
+        </div>
+      </div>
+      <div class="qa">
+        <div class="question">How do I pay?</div>
+        <div class="answer">
+          We accept payment via Zelle. Instructions and the payment details are shown in the 
+          Student Portal when you complete enrollment.
+        </div>
+      </div>
+      <div class="qa">
+        <div class="question">What is the refund policy?</div>
+        <div class="answer">
+          Refunds are considered on a case-by-case basis. Please contact us as early as possible 
+          if your circumstances change. Generally, refunds are not available after classes have begun.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 3 -->
+  <div class="section" id="classes">
+    <div class="section-header">
+      <div class="section-number">3</div>
+      <div class="section-title">Classes &amp; Schedule</div>
+    </div>
+    <div class="section-body">
+      <div class="qa">
+        <div class="question">When and where are classes held?</div>
+        <div class="answer">
+          Classes are held on Saturday mornings at our regular venue in the Bay Area. 
+          Specific dates, times, and location details are communicated to enrolled families 
+          before each session begins.
+        </div>
+      </div>
+      <div class="qa">
+        <div class="question">How long is each class?</div>
+        <div class="answer">
+          Each class session is approximately one hour long.
+        </div>
+      </div>
+      <div class="qa">
+        <div class="question">How many classes are in each session?</div>
+        <div class="answer">
+          Each session (Fall, Winter, Spring) typically includes 10–11 class dates. 
+          The exact dates are listed in the Student Portal under your child's session information.
+        </div>
+      </div>
+      <div class="qa">
+        <div class="question">What if my child misses a class?</div>
+        <div class="answer">
+          Please inform your child's teacher in advance if they will be absent. Attendance is 
+          tracked and visible to you in the Student Portal. Consistent attendance is important 
+          for progress — we encourage families to prioritize class attendance.
+        </div>
+      </div>
+      <div class="qa">
+        <div class="question">What if a class is cancelled?</div>
+        <div class="answer">
+          In case of a cancellation (e.g. holiday, unforeseen circumstances), families will be 
+          notified by email. The school makes every effort to minimize cancellations.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 4 -->
+  <div class="section" id="curriculum">
+    <div class="section-header">
+      <div class="section-number">4</div>
+      <div class="section-title">Curriculum &amp; Levels</div>
+    </div>
+    <div class="section-body">
+      <div class="qa">
+        <div class="question">What curriculum does HKN use?</div>
+        <div class="answer">
+          HKN uses a structured, graded curriculum with dedicated textbooks and exercise books 
+          for each level. The program progresses from foundational literacy (letters, sounds) 
+          through reading, writing, grammar, and conversational Hindi.
+        </div>
+      </div>
+      <div class="qa">
+        <div class="question">What are the class levels?</div>
+        <div class="answer">
+          Our program has nine levels across three bands:
+          <ul>
+            <li><strong>Beginner (Beg-1, Beg-2, Beg-3)</strong> — letter recognition, phonics, basic vocabulary</li>
+            <li><strong>Intermediate (Int-1, Int-2, Int-3, Int-4)</strong> — reading, writing, grammar</li>
+            <li><strong>Advanced (Adv-1, Adv-2)</strong> — fluency, composition, literature</li>
+          </ul>
+          <div class="highlight-box">
+            Each level typically takes one full school year (three sessions) to complete. 
+            Students are assessed and placed at the appropriate level when they join.
+          </div>
+        </div>
+      </div>
+      <div class="qa">
+        <div class="question">What books does my child need?</div>
+        <div class="answer">
+          Books are provided by the school and distributed at orientation. Each level uses a 
+          specific Textbook and Exercise Book. Students who continue from one level to the next 
+          within the same book may keep their book — no new book is needed until they advance 
+          to the next book level.
+        </div>
+      </div>
+      <div class="qa">
+        <div class="question">How is my child assessed?</div>
+        <div class="answer">
+          Teachers assess students on three skills — Reading, Writing, and Speaking — at the 
+          end of each session. Scores are visible in the Student Portal.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 5 -->
+  <div class="section" id="homework">
+    <div class="section-header">
+      <div class="section-number">5</div>
+      <div class="section-title">Homework &amp; Progress</div>
+    </div>
+    <div class="section-body">
+      <div class="qa">
+        <div class="question">Is homework assigned?</div>
+        <div class="answer">
+          Yes — teachers assign regular homework from the exercise book. Completing homework 
+          consistently is one of the most important factors in a student's progress in Hindi.
+        </div>
+      </div>
+      <div class="qa">
+        <div class="question">How can I support my child's learning at home?</div>
+        <div class="answer">
+          <ul>
+            <li>Encourage daily practice — even 10–15 minutes makes a big difference</li>
+            <li>Help your child complete their exercise book homework on time</li>
+            <li>Speak Hindi at home when possible</li>
+            <li>Read Hindi books or watch age-appropriate Hindi content together</li>
+            <li>Celebrate small milestones — learning a new script or reading their first sentence</li>
+          </ul>
+        </div>
+      </div>
+      <div class="qa">
+        <div class="question">How do I know how my child is progressing?</div>
+        <div class="answer">
+          Progress is tracked in three ways:
+          <ul>
+            <li><strong>Attendance</strong> — visible in the Student Portal for each session</li>
+            <li><strong>Scores</strong> — Reading, Writing, and Speaking scores updated by teachers</li>
+            <li><strong>Teacher feedback</strong> — reach out to your child's teacher directly with questions</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 6 -->
+  <div class="section" id="responsibilities">
+    <div class="section-header">
+      <div class="section-number">6</div>
+      <div class="section-title">Parent Responsibilities</div>
+    </div>
+    <div class="section-body">
+      <div class="qa">
+        <div class="question">What is expected of parents?</div>
+        <div class="answer">
+          <ul>
+            <li>Ensure your child attends classes regularly and on time</li>
+            <li>Inform the teacher in advance of any planned absences</li>
+            <li>Ensure homework is completed before each class</li>
+            <li>Keep contact information up to date in the Student Portal</li>
+            <li>Pay enrollment fees on time</li>
+            <li>Communicate proactively with teachers about any concerns</li>
+          </ul>
+        </div>
+      </div>
+      <div class="qa">
+        <div class="question">How do I contact my child's teacher?</div>
+        <div class="answer">
+          Teacher contact details are shared with enrolled families. You can also reach us at 
+          <a href="mailto:info@hindikineev.org" style="color:#c85a00;">info@hindikineev.org</a> 
+          and we will connect you with the right person.
+        </div>
+      </div>
+      <div class="qa">
+        <div class="question">What is the code of conduct?</div>
+        <div class="answer">
+          We expect all students to be respectful to teachers and fellow students, come prepared 
+          with their books and completed homework, and maintain a positive attitude toward learning. 
+          Students who are disruptive may be asked to sit out of class activities.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 7 -->
+  <div class="section" id="portal">
+    <div class="section-header">
+      <div class="section-number">7</div>
+      <div class="section-title">Checking Your Child's Progress Online</div>
+    </div>
+    <div class="section-body">
+      <div class="qa">
+        <div class="question">How do I access the Student Portal?</div>
+        <div class="answer">
+          Visit the HKN Student Portal and enter your parent email address, your child's first name, 
+          and date of birth. If your child is enrolled, you will see their current session information, 
+          attendance record, and assessment scores.
+          <div class="portal-box">
+            🔗 Access the portal at: 
+            <a href="https://www.hindikineev.org" target="_blank">www.hindikineev.org</a> — 
+            look for the Student Portal link on the website.
+          </div>
+        </div>
+      </div>
+      <div class="qa">
+        <div class="question">What information is available in the portal?</div>
+        <div class="answer">
+          <ul>
+            <li>Your child's current enrollment status</li>
+            <li>Current session — teacher, class time, class level, and book</li>
+            <li>Attendance record for the current session</li>
+            <li>Reading, Writing, and Speaking scores</li>
+            <li>Enrollment confirmation and payment status</li>
+          </ul>
+        </div>
+      </div>
+      <div class="qa">
+        <div class="question">My child's information is not showing up — what do I do?</div>
+        <div class="answer">
+          Please make sure you are entering the same email address and date of birth that were 
+          provided during enrollment. If you continue to have trouble, contact us at 
+          <a href="mailto:info@hindikineev.org" style="color:#c85a00;">info@hindikineev.org</a>.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    Hindi Ki Neev · <a href="mailto:info@hindikineev.org" style="color:#999;">info@hindikineev.org</a> · 
+    <a href="https://www.hindikineev.org" style="color:#999;">www.hindikineev.org</a><br>
+    <span style="margin-top:6px; display:inline-block;">© 2026 Hindi Ki Neev. All rights reserved.</span>
+  </div>
+
+</div>
 </body>
 </html>
