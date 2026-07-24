@@ -696,6 +696,13 @@ const SessionEngine = {
       return today >= dates[0] && today <= dates[dates.length - 1];
     });
     if (underway) return underway;
+    // No session is literally happening today (e.g. summer break) — prefer
+    // whichever session is currently open for enrollment, since that's the
+    // operative "current" session for admin/teacher purposes even before
+    // its first class date arrives. Mirrors the same fix already applied
+    // to getActiveSession() for the top banner.
+    const openSess = sessions.find(s => s.enrollmentOpen);
+    if (openSess) return openSess;
     const started = sessions.filter(s => (s.classDates||[]).length && s.classDates[0] <= today);
     return started.length ? started[started.length - 1] : sessions[sessions.length - 1];
   },
