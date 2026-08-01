@@ -3363,6 +3363,7 @@ function renderClassCards() {
   sessStudents.forEach(s => {
     const sd = (s.sessionData || []).find(d => d.session === sessName);
     if (!sd) return;
+    if (!sd.teacher) return;  // skip students with no teacher assigned yet — not a real class
     const teacher   = sd.teacher   || '—';
     const classTime = sd.classTime || '—';
     const key = teacher + '|' + classTime;
