@@ -1,5 +1,5 @@
 # HKN Portal — Project README
-*Last updated: July 24, 2026*
+*Last updated: August 8, 2026*
 
 ---
 
@@ -22,6 +22,13 @@ been retired from active use.
   copies, with distributed-book counts calculated live from student data
 - **Parent portal** (anonymous access) lets parents look up their child's
   status, attendance, and scores without logging in
+- **Classes** page groups students into cards by teacher + class time, with
+  Teacher and Class Level filter dropdowns (matching the Student Directory's
+  filter pattern). Each class card also has a **📝 Add Homework Note**
+  button — see "Homework Notes" section below
+- **FAQs** page (renamed from "Parent Guide") is linked prominently on the
+  parent portal's Welcome screen, not just the detailed info page — teacher
+  feedback was that nobody read "Parent Guide" but they will read "FAQs"
 
 ---
 
@@ -30,7 +37,7 @@ been retired from active use.
 | File | Purpose | How to edit |
 |------|---------|-------------|
 | `index.html` | The entire portal — staff portal, parent portal, all features | VS Code or any text editor. Deploy by uploading to GitHub (overwrites by matching filename — no deletion needed). |
-| `HKN_Parent_Guide.html` | Parent-facing policy guide (opens when parent clicks "Parent Guide" button) | VS Code — find the question/answer text you want to change, edit between the tags, save. |
+| `HKN_FAQs.html` | Parent-facing FAQ page (renamed from `HKN_Parent_Guide.html` in August 2026 — see "Editing the FAQs" below) | VS Code — find the question/answer text you want to change, edit between the tags, save. |
 | `schema.sql` | Complete, consolidated database schema — every table, function, RLS policy, and grant, built from live introspection of production. Used to stand up a fresh (e.g. dev/staging) Supabase project from scratch. | Reference/setup only — not something you "run" against an already-configured project. |
 | `book_inventory_plan.md` | Original implementation plan for the book inventory feature (now built) | Reference document |
 
@@ -62,7 +69,7 @@ Then open `http://localhost:8080` in Chrome.
 
 | Table | What it stores |
 |-------|---------------|
-| `students` | All student records — bio info, `session_data` (attendance, scores, teacher, class level, book level per session), `status_history`, `last_parent_access` |
+| `students` | All student records — bio info, `session_data` (attendance, scores, teacher, class level, book level, and per-session `notes` — see "Homework Notes" below), `status_history`, `last_parent_access` |
 | `sessions` | School sessions (Fall-2026, Spring-2026 etc.) with class dates, fees, enrollment status |
 | `teachers` | Teacher/admin accounts |
 | `templates` | Email templates |
@@ -183,14 +190,40 @@ the GitHub website, no command line needed.
   Squarespace DNS records above, and is why file-swapping between the two
   repos never requires touching DNS at all.
 
+### Troubleshooting a deployment that doesn't seem to show up
+
+Two real incidents worth knowing about, both encountered in August 2026:
+
+**1. GitHub's own build infrastructure can fail or get stuck**, independent
+of anything in your commit. If a change looks correct on GitHub (open the
+file directly in GitHub's web viewer and confirm your edit is actually
+there) but still isn't showing live even after a hard refresh, incognito
+window, and a cache-busting `?v=2` URL — check the repo's **Actions** tab.
+A red X means the deployment itself failed (this happened once during a
+genuine GitHub-wide outage — check `githubstatus.com` if it looks
+widespread); a run stuck on "Queued" for many minutes is the same kind of
+issue. The fix is usually just to wait, or to make a trivial new commit
+(e.g. add/remove a blank line) to trigger a fresh deployment attempt.
+
+**2. A page already open in a browser tab won't pick up new code just
+because the deployment succeeded.** If a page's JavaScript looks unchanged
+even after confirming (via GitHub's Actions tab and `[functionName].toString()`
+in the console) that the new code is genuinely live, try navigating *away*
+from that page and back (e.g. Dashboard → Classes) rather than just
+refreshing — this forces the render function to actually run again with the
+current code.
+
 ---
 
-## Editing the Parent Guide
+## Editing the FAQs
 
-**File:** `HKN_Parent_Guide.html`, uploaded alongside `index.html` in the
-production repo.
+**File:** `HKN_FAQs.html` (renamed from `HKN_Parent_Guide.html` in August
+2026), uploaded alongside `index.html` in the production repo. Linked from
+two places in the parent portal: a prominent button on the Welcome screen
+("❓ Have questions? Check our FAQs") and a smaller link on the detailed
+student info page.
 
-The file is organized in 7 sections. Each question/answer looks like this:
+The file is organized in sections. Each question/answer looks like this:
 
 ```html
 <div class="question">What is Hindi Ki Neev?</div>
@@ -201,6 +234,14 @@ The file is organized in 7 sections. Each question/answer looks like this:
 
 **To edit text:** open in VS Code, search for the text you want to change,
 edit the words between the tags, save. Do not change anything inside `< >` brackets.
+
+**To highlight a specific sentence** (e.g. the attendance policy's
+unexcused-absence warning is shown in red), wrap it in
+`<span style="color:#c0392b; font-weight:600;">...</span>`.
+
+**If you ever rename this file again:** two places in `index.html` reference
+it by filename (`href="./HKN_FAQs.html"`) — both the Welcome-page button and
+the detailed-page link need updating, or the buttons will 404.
 
 After editing, upload the updated file to the production repo (see Deployment above).
 
@@ -217,6 +258,40 @@ The scoring guide is stored in Supabase (not a file). To edit:
 5. Click **Save level**
 
 Changes are immediate — no deployment needed.
+
+---
+
+## Homework Notes (Classes page)
+
+Each class card on the **Classes** page has a **📝 Add Homework Note**
+button, letting a teacher broadcast the same homework instructions to every
+student in that specific class at once — instead of typing the same text
+into each student's individual notes field one at a time.
+
+**How it works:** the entered text gets formatted as `Homework <date>:
+<text>` and appended as a new line to each enrolled student's own
+per-session `notes` field — the same field parents already see under
+"Notes from your teacher" in their portal. Each student gets an independent
+copy from that point forward; it is a one-time broadcast, not a shared or
+synced note.
+
+**Permissions:** a teacher only sees this button on classes they actually
+teach — it's not just hidden, the button doesn't render in the page at all
+for another teacher's class card. Admins see it on every class card. This
+reuses the exact same ownership check as the pre-existing class-level Notes
+feature on the same page.
+
+**Undo:** immediately after adding a homework note, that specific class
+card shows "✓ Homework note added — Undo". Clicking it removes that exact
+line from each student who received it (with a safety check — it only
+removes the line if it's still each student's most recent note, so it won't
+accidentally strip something added afterward). **This only covers the most
+recent broadcast** — it's session-local (an in-memory JavaScript variable,
+not persisted) and disappears if you navigate away from Classes or refresh
+the page, even though the note itself remains correctly saved. There is no
+way to undo an older broadcast or view a history of past ones — a mistake
+noticed later has to be corrected manually, per student, in the Student
+Detail Modal.
 
 ---
 
@@ -286,6 +361,35 @@ actually added to Redirect URLs (only assumed to have been). Both settings
 are now correctly configured — see the "Supabase Auth URL Configuration"
 section above for what each setting does and why both matter.
 
+### Staff pages showing the wrong "current" session mid-year (fixed August 2026)
+`SessionEngine.getUnderwaySession()` — used by the Student Directory,
+Attendance Marking's default session, and the teacher-edit-permission check
+in the Student Detail Modal — originally fell back to "the most recently
+**started** session" whenever no session's class dates literally covered
+*today*. Since Fall-2026's first class date (Sept 12) is in the future
+during the summer, it was excluded from that fallback entirely, causing
+Spring-2026 (already finished) to be picked as "current" instead — showing
+stale class levels in the Directory, defaulting Attendance to the wrong
+session, and even blocking teachers from editing their own students' current
+scores/notes since the ownership check thought Fall-2026 wasn't the active
+session.
+
+**Fixed by preferring the `enrollmentOpen: true` session** as a fallback,
+before falling through to "most recently started" — mirroring the same fix
+already applied to `getActiveSession()` for the top banner:
+```javascript
+const openSess = sessions.find(s => s.enrollmentOpen);
+if (openSess) return openSess;
+```
+
+### Classes page showing a confusing "unassigned" catch-all card (fixed August 2026)
+Students with no teacher assigned yet (In-Process, Dropped, etc.) were all
+being grouped into a single card keyed `'—|—'`, mixing together students
+with completely different statuses and no way to tell them apart. Fixed by
+excluding students with no teacher from the grouping entirely — they remain
+fully visible everywhere else (Directory, their own record), just not on
+this "class rosters" page, which now only shows real, staffed classes.
+
 ---
 
 ## Accounts In Use (reference only)
@@ -311,6 +415,7 @@ section above for what each setting does and why both matter.
 
 - **Supabase support:** `https://supabase.com/support`
 - **GitHub Pages docs:** `https://docs.github.com/en/pages`
+- **GitHub status (check during odd deployment issues):** `https://githubstatus.com`
 - **School website:** `https://www.hindikineev.org`
 - **School email:** `info@hindikineev.org`
 
@@ -323,6 +428,11 @@ section above for what each setting does and why both matter.
 - [x] Cutover completed — `portal.hindikineev.org` running new Supabase-based system
 - [x] Production login fully verified — both Site URL and Redirect URLs correctly configured
 - [x] Parent portal session-selection bug found and fixed
+- [x] Staff-side "current session" detection bug found and fixed (Directory,
+      Attendance default, teacher edit permissions)
+- [x] Classes page: teacher/level filters added, unassigned-students card removed
+- [x] Homework Note bulk-broadcast feature added, with same-session Undo
+- [x] Parent Guide renamed to FAQs, made prominent on the parent Welcome screen
 - [ ] Old Drive/Apps Script backend — no urgency, retire whenever convenient
 - [ ] Populate remaining scoring guide content (most levels still placeholder text)
 - [ ] Decide long-term purpose of `portal-new` — currently kept as an ongoing
