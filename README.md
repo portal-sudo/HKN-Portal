@@ -39,7 +39,6 @@ been retired from active use.
 | `index.html` | The entire portal — staff portal, parent portal, all features | VS Code or any text editor. Deploy by uploading to GitHub (overwrites by matching filename — no deletion needed). |
 | `HKN_FAQs.html` | Parent-facing FAQ page (renamed from `HKN_Parent_Guide.html` in August 2026 — see "Editing the FAQs" below) | VS Code — find the question/answer text you want to change, edit between the tags, save. |
 | `schema.sql` | Complete, consolidated database schema — every table, function, RLS policy, and grant, built from live introspection of production. Used to stand up a fresh (e.g. dev/staging) Supabase project from scratch. | Reference/setup only — not something you "run" against an already-configured project. |
-| `book_inventory_plan.md` | Original implementation plan for the book inventory feature (now built) | Reference document |
 
 ---
 
