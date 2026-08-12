@@ -624,6 +624,7 @@ tbody tr { transition: background var(--transition); }
     </div>
     <div class="nav-right">
       <span id="drive-sync-status" style="font-size:13px; font-weight:600; color:rgba(255,255,255,0.85); margin-right:4px; cursor:pointer;" onclick="manualSync()" title="Click to refresh from Supabase"></span>
+      <span id="app-version-tag" style="font-size:10px; color:rgba(255,255,255,0.5); margin-right:10px;" title="App version — check this if unsure which file is deployed"></span>
       <span class="nav-user" id="nav-user-email"></span>
       <span class="nav-role-pill" id="nav-role-label"></span>
       <button class="nav-logout" onclick="doLogout()">Sign out</button>
@@ -1157,6 +1158,13 @@ function seedStudentsIfEmpty() {
 // HKN APP.JS  —  All UI logic
 // ═══════════════════════════════════════════════════════════════
 
+// ── VERSION ──────────────────────────────────────────────────
+// Bump this every time an updated index.html is generated — shown
+// in the top nav bar and checkable via console (APP_VERSION), so
+// it's always possible to tell which version a saved file or a
+// deployed site is actually running. Format: v<date>.<n>
+const APP_VERSION = 'v2026-08-12.1';
+
 // ── STATE ────────────────────────────────────────────────────
 // Device detection — set once at boot, used for mobile-specific behavior
 const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.innerWidth < 768;
@@ -1195,6 +1203,10 @@ let intakeState = {};   // public intake flow state
 
 // ── BOOT ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+  // Show app version immediately, regardless of login state or page path
+  const versionTag = document.getElementById('app-version-tag');
+  if (versionTag) versionTag.textContent = APP_VERSION;
+
   // seedAttributesIfEmpty and seedStudentsIfEmpty run after SupabaseSync.load()
   // completes inside loadAppShell() — not here, to avoid writing seed data to
   // Supabase before the cache is populated with real data.
@@ -1221,12 +1233,17 @@ function showScreen(screen) {
 
 // ── AUTH ─────────────────────────────────────────────────────
 
-// Supabase client — anon/publishable key is safe in browser; RLS enforces access control
+// Supabase client — picks project based on domain, so the same index.html
+// can be deployed to both portal.hindikineev.org (production) and
+// portal-new.hindikineev.org (dev/test) without any manual editing.
+// Production is the narrow, explicit case; everything else (portal-new,
+// localhost, anything else) safely defaults to the dev project.
+const SUPABASE_CONFIG = (window.location.hostname === 'portal.hindikineev.org')
+  ? { url: 'https://dovmjcanfmswxofazvgc.supabase.co', key: 'sb_publishable_NiRzP3QvKZjbtt0AzNh0TA_aDW3rUXm' }  // production
+  : { url: 'https://fbujsdqjqeavfykgsttp.supabase.co', key: 'sb_publishable_d9-vJp9YW20CkWnEX7d3Tg_QaJ4FD8v' };  // dev/portal-new
+
 const { createClient } = supabase;
-const _supabase = createClient(
-  'https://dovmjcanfmswxofazvgc.supabase.co',
-  'sb_publishable_NiRzP3QvKZjbtt0AzNh0TA_aDW3rUXm'
-);
+const _supabase = createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.key);
 
 // Capture provider_token (Google access token with gmail.send scope) when available.
 // provider_token is only present in the SIGNED_IN event during the OAuth redirect
@@ -4335,15 +4352,43 @@ function removeAttrFromBtn(btn) {
 
 // ── IMPORT PAGE ──────────────────────────────────────────────
 // ── BOOK INVENTORY PAGE ──────────────────────────────────────
+let _selectedInventorySession = null; // remembers admin's session choice across re-renders
+
+function getPreviousSessionName(sessName) {
+  const sessions = DB.getSessions();
+  // Sort all sessions with real class dates chronologically by earliest date
+  const sorted = sessions
+    .filter(s => (s.classDates || []).length > 0)
+    .slice()
+    .sort((a, b) => a.classDates[0].localeCompare(b.classDates[0]));
+  const idx = sorted.findIndex(s => s.name === sessName);
+  if (idx <= 0) return ''; // no earlier session found
+  return sorted[idx - 1].name;
+}
+
 async function renderInventory() {
-  const sess = (SessionEngine.getActiveSession() || SessionEngine.getCurrentSession())?.name || 'Fall-2026';
-  const prevSessions = { 'Fall-2026': 'Spring-2026', 'Spring-2026': 'Winter-2025', 'Winter-2025': 'Fall-2025' };
-  const prevSess = prevSessions[sess] || '';
+  const allSessions = DB.getSessions();
+  const defaultSess = (SessionEngine.getActiveSession() || SessionEngine.getCurrentSession())?.name || 'Fall-2026';
+  const sess = (_selectedInventorySession && allSessions.some(s => s.name === _selectedInventorySession))
+    ? _selectedInventorySession
+    : defaultSess;
+  const prevSess = getPreviousSessionName(sess);
 
   document.getElementById('content-area').innerHTML = `
     <div class="page-header">
       <div class="page-title">📚 Book Inventory</div>
       <div class="page-subtitle">Starting stock, assigned books for <strong>${escHtml(sess)}</strong>, and remaining inventory</div>
+    </div>
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
+      <label class="form-label" style="margin:0; white-space:nowrap;">Session</label>
+      <select class="form-select" id="inv-session-sel" onchange="changeInventorySession(this.value)" style="max-width:200px;">
+        ${allSessions.map(s => `<option value="${escHtml(s.name)}" ${s.name === sess ? 'selected' : ''}>${escHtml(s.name)}</option>`).join('')}
+      </select>
+      ${prevSess ? `
+        <button class="btn btn-secondary btn-sm" onclick="confirmCarryForwardStock('${escAttr(sess)}','${escAttr(prevSess)}')">
+          ⬅️ Copy ${escHtml(prevSess)}'s Remaining into Starting Stock
+        </button>
+      ` : ''}
     </div>
     <div id="inv-summary-area"><div style="padding:32px; text-align:center; color:var(--ink-light); font-size:13px;">Loading inventory…</div></div>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:20px;">
@@ -4454,6 +4499,69 @@ async function renderInventory() {
 
   // Load summary data
   await _loadInventorySummary(sess, prevSess);
+}
+
+function changeInventorySession(newSess) {
+  _selectedInventorySession = newSess;
+  renderInventory();
+}
+
+function confirmCarryForwardStock(sess, prevSess) {
+  showConfirm(
+    '📚',
+    'Copy starting stock?',
+    `This will set <strong>${escHtml(sess)}</strong>'s Starting Stock for every book to <strong>${escHtml(prevSess)}</strong>'s current Remaining count. Any values already entered for ${escHtml(sess)} will be overwritten.`,
+    'Copy stock',
+    'btn-primary',
+    () => carryForwardStock(sess, prevSess)
+  );
+}
+
+async function carryForwardStock(sess, prevSess) {
+  try {
+    const prevPrevSess = getPreviousSessionName(prevSess);
+    const [invRows, repRows, tchRows, distRows] = await Promise.all([
+      _supabase.from('book_inventory').select('book_level, book_type, starting_stock').eq('session', prevSess),
+      _supabase.from('book_replacements').select('book_level, book_type').eq('session', prevSess),
+      _supabase.from('book_teacher_copies').select('book_level, book_type').eq('session', prevSess).eq('returned', false),
+      _supabase.rpc('get_distributed_books', { p_session: prevSess, p_prev_session: prevPrevSess }),
+    ]);
+    if (invRows.error) throw invRows.error;
+
+    const stockMap = {};
+    (invRows.data || []).forEach(r => { stockMap[r.book_level + '|' + r.book_type] = r.starting_stock; });
+    const repMap = {};
+    (repRows.data || []).forEach(r => { const k = r.book_level + '|' + r.book_type; repMap[k] = (repMap[k] || 0) + 1; });
+    const tchMap = {};
+    (tchRows.data || []).forEach(r => { const k = r.book_level + '|' + r.book_type; tchMap[k] = (tchMap[k] || 0) + 1; });
+    const distMap = {};
+    (distRows.data || []).forEach(r => { distMap[r.book_level] = parseInt(r.distributed) || 0; });
+
+    const LEVELS = ['Book 1','Book 2','Book 3','Book 4','Book 5'];
+    const TYPES  = ['Textbook','Exercise Book'];
+    const upserts = [];
+    LEVELS.forEach(lvl => {
+      TYPES.forEach(typ => {
+        const k = lvl + '|' + typ;
+        const remaining = (stockMap[k] ?? 0) - (distMap[lvl] ?? 0) - (repMap[k] ?? 0) - (tchMap[k] ?? 0);
+        upserts.push({
+          session: sess, book_level: lvl, book_type: typ,
+          starting_stock: Math.max(0, remaining),
+          updated_at: new Date().toISOString(),
+        });
+      });
+    });
+
+    const { error } = await _supabase.from('book_inventory')
+      .upsert(upserts, { onConflict: 'session,book_level,book_type' });
+    if (error) throw error;
+
+    showToast(`Starting stock for ${sess} updated from ${prevSess}'s remaining copies`, 'success');
+    renderInventory();
+  } catch(e) {
+    showToast('Failed to copy stock: ' + e.message, 'error');
+    console.warn('carryForwardStock:', e.message);
+  }
 }
 
 async function _loadInventorySummary(sess, prevSess) {
