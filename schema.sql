@@ -4,11 +4,39 @@
 -- Supabase project (dovmjcanfmswxofazvgc), not from memory.
 -- Updated: August 2026 — get_public_data() session ordering fix applied
 -- (see README "Known Fixes" for why the original ORDER BY was buggy).
+-- Updated: August 2026 — added student-photos Storage bucket, its
+-- access policies, and the students.photo_path column (originally
+-- foundation only; display + individual per-student upload UI added
+-- in a later update the same month — see README "Student Photos").
+-- Updated: August 2026 — added teacher_presence table, teachers.
+-- last_login column, and update_own_last_login() function. See
+-- Section 4C below for an important PostgREST schema cache gotcha
+-- hit while building this.
+-- Updated: August 2026 — added admins.last_login and get_admin_activity()
+-- so admin can see other admins' activity too, without adding any
+-- direct SELECT access to the admins table itself.
+-- Updated: August 2026 — fixed student_photos_select policy (was
+-- is_portal_user() only, excluding admins — see Section 4B below).
+-- Updated: August 2026 — rewritten to be fully idempotent (safe to
+-- run repeatedly against an EXISTING database, not just a fresh one).
+-- Every create table/policy/seed-insert below can now be re-run
+-- without erroring or duplicating data — this is the ONE canonical
+-- file for both scenarios: standing up a brand-new project, and
+-- promoting accumulated changes to an existing one (e.g. production)
+-- that already has some but not all of them. No separate "promote to
+-- production" script needed anymore.
+-- Updated: August 2026 — added explicit ALTER TABLE ADD COLUMN IF NOT
+-- EXISTS statements (Section 1B) for admins.last_login, students.
+-- photo_path, and teachers.last_login — CREATE TABLE IF NOT EXISTS
+-- alone does NOT backfill columns onto a table that already exists,
+-- which silently broke the production promotion. See Section 1B and
+-- README "Known Fixes" for the full story.
 --
--- Run this top-to-bottom on a FRESH Supabase project to recreate the
--- entire structure: tables, constraints, RLS, policies, functions,
--- grants, and the minimum seed data needed to log in and use the
--- portal before restoring a JSON backup.
+-- Run this top-to-bottom on ANY Supabase project — fresh or existing —
+-- to bring it fully up to date with everything below: tables,
+-- constraints, RLS, policies, functions, grants, and the minimum seed
+-- data needed to log in and use the portal before restoring a JSON
+-- backup.
 --
 -- After running this file:
 --   1. Register the dev project's URL/key in a dev copy of index.html
@@ -26,25 +54,27 @@
 -- SECTION 1 — TABLES
 -- =====================================================================
 
-create table admins (
+create table if not exists admins (
   email       text primary key,
   first_name  text not null,
   last_name   text not null,
   phone       text default '',
+  last_login  timestamptz,
   created_at  timestamptz not null default now()
 );
 
-create table teachers (
+create table if not exists teachers (
   id          uuid primary key default gen_random_uuid(),
   first_name  text,
   last_name   text,
   email       text not null unique,
   phone       text,
   role        text not null default 'teacher',
+  last_login  timestamptz,
   created_at  timestamptz not null default now()
 );
 
-create table students (
+create table if not exists students (
   id                      text primary key,
   student_id              text unique,
   status                  text not null,
@@ -71,11 +101,12 @@ create table students (
   session_data            jsonb not null default '[]'::jsonb,
   status_history          jsonb not null default '[]'::jsonb,
   last_parent_access      timestamptz,
+  photo_path              text,
   created_at              timestamptz not null default now(),
   updated_at              timestamptz not null default now()
 );
 
-create table sessions (
+create table if not exists sessions (
   id               text primary key,
   term             text,
   year             integer,
@@ -87,7 +118,7 @@ create table sessions (
   created_at       timestamptz not null default now()
 );
 
-create table templates (
+create table if not exists templates (
   id          text primary key,
   name        text,
   subject     text,
@@ -96,7 +127,7 @@ create table templates (
   created_at  timestamptz not null default now()
 );
 
-create table settings (
+create table if not exists settings (
   id                       integer primary key default 1,
   fee_tracker_session      text,
   motd                     text,
@@ -107,7 +138,7 @@ create table settings (
   inactivity_minutes       integer default 45
 );
 
-create table lookup_config (
+create table if not exists lookup_config (
   id          uuid primary key default gen_random_uuid(),
   type        text not null,
   value       text not null,
@@ -115,13 +146,13 @@ create table lookup_config (
   book_level  text
 );
 
-create table scoring_guide (
+create table if not exists scoring_guide (
   level       text primary key,
   content     text default '',
   updated_at  timestamptz not null default now()
 );
 
-create table book_inventory (
+create table if not exists book_inventory (
   id              uuid primary key default gen_random_uuid(),
   session         text not null,
   book_level      text not null,
@@ -131,7 +162,7 @@ create table book_inventory (
   unique (session, book_level, book_type)
 );
 
-create table book_replacements (
+create table if not exists book_replacements (
   id          uuid primary key default gen_random_uuid(),
   date        date not null,
   session     text not null,
@@ -146,7 +177,7 @@ create table book_replacements (
   created_at  timestamptz not null default now()
 );
 
-create table book_teacher_copies (
+create table if not exists book_teacher_copies (
   id            uuid primary key default gen_random_uuid(),
   date          date not null,
   session       text not null,
@@ -159,6 +190,29 @@ create table book_teacher_copies (
   logged_by     text not null,
   created_at    timestamptz not null default now()
 );
+
+
+-- =====================================================================
+-- SECTION 1B — COLUMN PATCHES
+-- IMPORTANT: CREATE TABLE IF NOT EXISTS only checks whether the TABLE
+-- already exists — if it does, the entire statement is skipped,
+-- including any columns defined inside it. It does NOT diff the
+-- column list and backfill anything missing. So for any column added
+-- to a table that already existed BEFORE the column was introduced
+-- (as opposed to being part of the table from its very first
+-- creation), an explicit ALTER TABLE ADD COLUMN IF NOT EXISTS is
+-- required here too — redundant with the column already being listed
+-- in CREATE TABLE above for a brand-new database, but essential for
+-- patching an existing one that predates it. Found the hard way in
+-- August 2026: running the newly-idempotent schema.sql against
+-- production silently failed to add these three columns, since
+-- admins/students/teachers already existed there — see README "Known
+-- Fixes" for the full story.
+-- =====================================================================
+
+alter table admins   add column if not exists last_login timestamptz;
+alter table students add column if not exists photo_path text;
+alter table teachers add column if not exists last_login timestamptz;
 
 
 -- =====================================================================
@@ -191,6 +245,49 @@ as $function$
     select 1 from teachers
     where lower(email) = lower(auth.jwt() ->> 'email')
   );
+$function$;
+
+-- Narrow SECURITY DEFINER function — only ever touches last_login for
+-- the calling user's own row. Deliberately not a general "update your
+-- own row" RLS policy, which would also let a teacher modify role,
+-- email, etc. on their own row. Updated August 2026 to also try
+-- admins — an email only ever matches one of the two tables, so the
+-- other UPDATE silently affects 0 rows.
+create or replace function update_own_last_login()
+returns void
+language plpgsql
+security definer
+as $function$
+begin
+  update teachers
+  set last_login = now()
+  where lower(email) = lower(auth.jwt() ->> 'email');
+
+  update admins
+  set last_login = now()
+  where lower(email) = lower(auth.jwt() ->> 'email');
+end;
+$function$;
+
+-- Narrow, admin-only function to read admin activity. Deliberately
+-- NOT a SELECT policy on admins itself — that table stays completely
+-- unreachable by any client-side query, by design (see README "Admin
+-- Safety Net"). Explicitly gates on is_admin() before returning
+-- anything, and only exposes email/name/last_login — not the whole
+-- table (e.g. not phone).
+create or replace function get_admin_activity()
+returns table(email text, first_name text, last_name text, last_login timestamptz)
+language plpgsql
+stable security definer
+as $function$
+begin
+  if not is_admin() then
+    raise exception 'Not authorized';
+  end if;
+  return query
+    select a.email, a.first_name, a.last_name, a.last_login
+    from admins a;
+end;
 $function$;
 
 create or replace function get_teacher_by_email(lookup_email text)
@@ -447,113 +544,251 @@ alter table book_teacher_copies  enable row level security;
 -- feature, including JSON restore. Do not add policies here.
 
 -- teachers
+drop policy if exists "teachers_select_own_or_admin" on teachers;
 create policy "teachers_select_own_or_admin"
   on teachers for select
   using (is_admin() OR is_portal_user() OR (lower(auth.jwt() ->> 'email') = lower(email)));
 
+drop policy if exists "teachers_admin_write" on teachers;
 create policy "teachers_admin_write"
   on teachers for all
   using (is_admin())
   with check (is_admin());
 
 -- students
+drop policy if exists "students_select_admin" on students;
 create policy "students_select_admin"
   on students for select
   using (is_admin());
 
+drop policy if exists "students_select_teacher" on students;
 create policy "students_select_teacher"
   on students for select
   using (is_portal_user());
 
+drop policy if exists "students_teacher_update" on students;
 create policy "students_teacher_update"
   on students for update
   using (is_portal_user())
   with check (is_portal_user());
 
+drop policy if exists "students_admin_write" on students;
 create policy "students_admin_write"
   on students for all
   using (is_admin())
   with check (is_admin());
 
 -- sessions
+drop policy if exists "sessions_select_authenticated" on sessions;
 create policy "sessions_select_authenticated"
   on sessions for select
   using (is_portal_user());
 
+drop policy if exists "sessions_admin_write" on sessions;
 create policy "sessions_admin_write"
   on sessions for all
   using (is_admin())
   with check (is_admin());
 
 -- templates
+drop policy if exists "templates_select_authenticated" on templates;
 create policy "templates_select_authenticated"
   on templates for select
   using (is_portal_user());
 
+drop policy if exists "templates_admin_write" on templates;
 create policy "templates_admin_write"
   on templates for all
   using (is_admin())
   with check (is_admin());
 
 -- settings
+drop policy if exists "settings_select_authenticated" on settings;
 create policy "settings_select_authenticated"
   on settings for select
   using (is_portal_user());
 
+drop policy if exists "settings_admin_write" on settings;
 create policy "settings_admin_write"
   on settings for all
   using (is_admin())
   with check (is_admin());
 
 -- lookup_config
+drop policy if exists "lookup_config_select_authenticated" on lookup_config;
 create policy "lookup_config_select_authenticated"
   on lookup_config for select
   using (is_portal_user());
 
+drop policy if exists "lookup_config_admin_write" on lookup_config;
 create policy "lookup_config_admin_write"
   on lookup_config for all
   using (is_admin())
   with check (is_admin());
 
 -- scoring_guide
+drop policy if exists "scoring_guide_select_authenticated" on scoring_guide;
 create policy "scoring_guide_select_authenticated"
   on scoring_guide for select
   using (is_portal_user());
 
+drop policy if exists "scoring_guide_admin_write" on scoring_guide;
 create policy "scoring_guide_admin_write"
   on scoring_guide for all
   using (is_admin())
   with check (is_admin());
 
 -- book_inventory
+drop policy if exists "book_inventory_read" on book_inventory;
 create policy "book_inventory_read"
   on book_inventory for select
   using (is_portal_user());
 
+drop policy if exists "book_inventory_admin_write" on book_inventory;
 create policy "book_inventory_admin_write"
   on book_inventory for all
   using (is_admin())
   with check (is_admin());
 
 -- book_replacements
+drop policy if exists "book_replacements_read" on book_replacements;
 create policy "book_replacements_read"
   on book_replacements for select
   using (is_portal_user());
 
+drop policy if exists "book_replacements_admin_write" on book_replacements;
 create policy "book_replacements_admin_write"
   on book_replacements for all
   using (is_admin())
   with check (is_admin());
 
 -- book_teacher_copies
+drop policy if exists "book_teacher_copies_read" on book_teacher_copies;
 create policy "book_teacher_copies_read"
   on book_teacher_copies for select
   using (is_portal_user());
 
+drop policy if exists "book_teacher_copies_admin_write" on book_teacher_copies;
 create policy "book_teacher_copies_admin_write"
   on book_teacher_copies for all
   using (is_admin())
   with check (is_admin());
+
+
+-- =====================================================================
+-- SECTION 4B — STORAGE (student photos)
+-- Added August 2026. Private bucket — not publicly accessible via a
+-- bare URL. Read access for any admin/teacher; upload/replace/delete
+-- restricted to admin only. Reuses the same is_admin()/is_portal_user()
+-- functions already used throughout this schema.
+--
+-- Fixed August 2026: student_photos_select originally used
+-- is_portal_user() only, which checks the teachers table specifically.
+-- Admins (rajiv@, portal@) live in the separate admins table and have
+-- no row in teachers, so uploads failed for them even though they
+-- correctly passed is_admin() on the INSERT policy — an upload
+-- requires a working SELECT policy too, same lesson as the
+-- teacher_presence issue in Section 4C below. Fixed by checking
+-- is_admin() OR is_portal_user(), same pattern already used
+-- correctly elsewhere (e.g. the teachers table's own SELECT policy).
+-- =====================================================================
+
+insert into storage.buckets (id, name, public)
+values ('student-photos', 'student-photos', false)
+on conflict (id) do nothing;
+
+drop policy if exists "student_photos_select" on storage.objects;
+create policy "student_photos_select"
+on storage.objects for select
+using (
+  bucket_id = 'student-photos'
+  and (is_admin() or is_portal_user())
+);
+
+drop policy if exists "student_photos_insert" on storage.objects;
+create policy "student_photos_insert"
+on storage.objects for insert
+with check (
+  bucket_id = 'student-photos'
+  and is_admin()
+);
+
+drop policy if exists "student_photos_update" on storage.objects;
+create policy "student_photos_update"
+on storage.objects for update
+using (
+  bucket_id = 'student-photos'
+  and is_admin()
+)
+with check (
+  bucket_id = 'student-photos'
+  and is_admin()
+);
+
+drop policy if exists "student_photos_delete" on storage.objects;
+create policy "student_photos_delete"
+on storage.objects for delete
+using (
+  bucket_id = 'student-photos'
+  and is_admin()
+);
+
+
+-- =====================================================================
+-- SECTION 4C — TEACHER PRESENCE
+-- Added August 2026. Lightweight "last seen" heartbeat table — a
+-- client-side timer upserts a row for the logged-in user every 60s
+-- while a tab is open. Admin can see everyone's; each user can only
+-- write their own row. Combined with teachers.last_login (added to
+-- the teachers table above), this gives admin a rough "who's active
+-- now / when did they last sign in" view without needing a genuine
+-- realtime presence system.
+--
+-- IMPORTANT — a real gotcha hit while building this: PostgREST caches
+-- table/policy structure separately from the database itself. Tables
+-- and policies created directly via SQL Editor are sometimes not
+-- picked up immediately, causing confusing 401/42501 errors on
+-- otherwise-correct policies. If this ever recurs after adding new
+-- tables/policies via SQL, run:
+--   NOTIFY pgrst, 'reload schema';
+-- before spending time re-checking policy correctness.
+--
+-- Also worth knowing: an upsert (INSERT ... ON CONFLICT DO UPDATE)
+-- requires a SELECT policy in addition to INSERT/UPDATE — both to
+-- check for conflicts, and because PostgREST returns the written row
+-- by default. A user needs to be able to SELECT their own row for
+-- their own upsert to succeed, not just INSERT/UPDATE it.
+-- =====================================================================
+
+create table if not exists teacher_presence (
+  email      text primary key,
+  last_seen  timestamptz not null default now()
+);
+
+alter table teacher_presence enable row level security;
+
+drop policy if exists "teacher_presence_select_admin" on teacher_presence;
+create policy "teacher_presence_select_admin"
+  on teacher_presence for select
+using (is_admin());
+
+drop policy if exists "teacher_presence_select_own" on teacher_presence;
+create policy "teacher_presence_select_own"
+  on teacher_presence for select
+using (lower(email) = lower(auth.jwt() ->> 'email'));
+
+drop policy if exists "teacher_presence_insert_own" on teacher_presence;
+create policy "teacher_presence_insert_own"
+  on teacher_presence for insert
+with check (lower(email) = lower(auth.jwt() ->> 'email'));
+
+drop policy if exists "teacher_presence_update_own" on teacher_presence;
+create policy "teacher_presence_update_own"
+  on teacher_presence for update
+using (lower(email) = lower(auth.jwt() ->> 'email'))
+with check (lower(email) = lower(auth.jwt() ->> 'email'));
+
+grant select, insert, update on teacher_presence to authenticated;
 
 
 -- =====================================================================
@@ -566,17 +801,20 @@ create policy "book_teacher_copies_admin_write"
 -- Admins — without this, nobody can log in at all
 insert into admins (email, first_name, last_name) values
   ('rajiv@hindikineev.org',  'Rajiv', 'Mathur'),
-  ('portal@hindikineev.org', 'HKN',   'Portal');
+  ('portal@hindikineev.org', 'HKN',   'Portal')
+on conflict (email) do nothing;
 
 -- Settings — single row must exist before first login
 insert into settings (id, intake_enabled, staff_enabled, inactivity_minutes)
-values (1, true, true, 45);
+values (1, true, true, 45)
+on conflict (id) do nothing;
 
 -- Scoring guide — 9 empty rows, one per class level
 insert into scoring_guide (level, content) values
   ('Beg-1', ''), ('Beg-2', ''), ('Beg-3', ''),
   ('Int-1', ''), ('Int-2', ''), ('Int-3', ''), ('Int-4', ''),
-  ('Adv-1', ''), ('Adv-2', '');
+  ('Adv-1', ''), ('Adv-2', '')
+on conflict (level) do nothing;
 
 -- Book inventory — 10 rows, placeholder starting stock (0).
 -- Update real starting stock via the portal's Book Inventory page once
@@ -591,7 +829,8 @@ insert into book_inventory (session, book_level, book_type, starting_stock) valu
   ('Fall-2026', 'Book 4', 'Textbook',      0),
   ('Fall-2026', 'Book 4', 'Exercise Book', 0),
   ('Fall-2026', 'Book 5', 'Textbook',      0),
-  ('Fall-2026', 'Book 5', 'Exercise Book', 0);
+  ('Fall-2026', 'Book 5', 'Exercise Book', 0)
+on conflict (session, book_level, book_type) do nothing;
 
 
 -- =====================================================================
