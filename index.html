@@ -1163,7 +1163,7 @@ function seedStudentsIfEmpty() {
 // in the top nav bar and checkable via console (APP_VERSION), so
 // it's always possible to tell which version a saved file or a
 // deployed site is actually running. Format: v<date>.<n>
-const APP_VERSION = 'v2026-08-12.1';
+const APP_VERSION = 'v2026-08-14.1';
 
 // ── STATE ────────────────────────────────────────────────────
 // Device detection — set once at boot, used for mobile-specific behavior
@@ -1305,6 +1305,11 @@ async function applySupabaseSession(session) {
     name:  teacher.first_name || email.split('@')[0],
   };
 
+  _startPresenceHeartbeat();
+  _supabase.rpc('update_own_last_login').then(({ error }) => {
+    if (error) console.warn('update_own_last_login:', error.message);
+  });
+
   if (teacher.role === 'teacher') {
     loadAppShell(true); // true = validate teacher after load
   } else {
@@ -1352,14 +1357,47 @@ async function manualSync() {
 
 async function doLogout() {
   try { await _supabase.auth.signOut(); } catch(e) { console.warn('signOut error:', e.message); }
+  _stopPresenceHeartbeat();
   currentUser = null;
   _clearInactivityTimer();
   showScreen('login');
 }
 function backToLogin() {
+  _stopPresenceHeartbeat();
   currentUser = null;
   _clearInactivityTimer();
   showScreen('login');
+}
+
+// ── TEACHER PRESENCE ─────────────────────────────────────────
+// Lightweight "last seen" heartbeat — updates every 60s while a tab
+// is open, so admin can see roughly who's currently active. Mobile
+// browsers suspend JS timers when a tab is backgrounded/screen locks,
+// so this naturally goes stale within ~2 min of someone stepping away,
+// even without an auto-logout timer.
+let _presenceHeartbeatTimer = null;
+
+async function _updatePresence() {
+  if (!currentUser) return;
+  try {
+    await _supabase.from('teacher_presence').upsert({
+      email: currentUser.email,
+      last_seen: new Date().toISOString(),
+    });
+  } catch(e) {
+    console.warn('_updatePresence:', e.message);
+  }
+}
+
+function _startPresenceHeartbeat() {
+  _updatePresence(); // fire immediately, then every 60s
+  if (_presenceHeartbeatTimer) clearInterval(_presenceHeartbeatTimer);
+  _presenceHeartbeatTimer = setInterval(_updatePresence, 60 * 1000);
+}
+
+function _stopPresenceHeartbeat() {
+  if (_presenceHeartbeatTimer) clearInterval(_presenceHeartbeatTimer);
+  _presenceHeartbeatTimer = null;
 }
 
 // ── INACTIVITY AUTO-LOGOUT ────────────────────────────────────
@@ -1513,7 +1551,7 @@ function navigateTo(page) {
 }
 
 // ── DASHBOARD ────────────────────────────────────────────────
-function renderDashboard() {
+async function renderDashboard() {
   const counts = DB.getStatusCounts();
   const sessions = DB.getSessions();
   const activeSess = SessionEngine.getActiveSession();
@@ -1524,8 +1562,57 @@ function renderDashboard() {
     return sd && !sd.feesPaid;
   }).length;
 
+  // Teacher activity — admin only, skip the fetch entirely for teachers
+  const isAdminView = currentUser.role === 'admin';
+  const presenceMap = isAdminView ? await _fetchTeacherPresence() : {};
+  const teacherActivityHtml = isAdminView ? DB.getTeachers().map(t => `
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--cream-dark);">
+      <span style="font-size:13px; font-weight:500;">${escHtml(t.firstName)} ${escHtml(t.lastName||'')}</span>
+      <div style="display:flex; gap:14px; font-size:11px;">
+        <span>${formatLastActive(t.email, presenceMap)}</span>
+        <span>${formatLastLogin(t.lastLogin)}</span>
+      </div>
+    </div>
+  `).join('') : '';
+
+  // Admin activity — reuses the same presenceMap fetched above, since
+  // teacher_presence captures any logged-in user regardless of role.
+  // Uses get_admin_activity() rather than a direct table read, since
+  // the admins table itself has no client-facing SELECT access at all.
+  const adminActivityList = isAdminView ? await _fetchAdminActivity() : [];
+  const adminActivityHtml = adminActivityList.map(a => `
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--cream-dark);">
+      <span style="font-size:13px; font-weight:500;">${escHtml(a.first_name)} ${escHtml(a.last_name||'')}</span>
+      <div style="display:flex; gap:14px; font-size:11px;">
+        <span>${formatLastActive(a.email, presenceMap)}</span>
+        <span>${formatLastLogin(a.last_login)}</span>
+      </div>
+    </div>
+  `).join('');
+
   const _motd = DB.getSettings().motd || '';
   const _motdDate = DB.getSettings().motdDate || '';
+
+  // Classes overview — now shown to both admin and teacher (replaces
+  // the old Sessions overview, which wasn't very useful on this page)
+  const classesOverviewHtml = (() => {
+    const sessName = activeSess?.name;
+    const students = allStudents.filter(s => s.status === 'Active');
+    const classMap = {};
+    students.forEach(s => {
+      const sd = (s.sessionData || []).find(d => d.session === sessName);
+      if (!sd || !sd.teacher) return;
+      const key = (sd.teacher || '') + '|' + (sd.classLevel || '') + '|' + (sd.classTime || '');
+      if (!classMap[key]) classMap[key] = { teacher: sd.teacher, classLevel: sd.classLevel || '—', classTime: sd.classTime || '—', count: 0 };
+      classMap[key].count++;
+    });
+    const rows = Object.values(classMap).sort((a,b) => a.teacher.localeCompare(b.teacher) || a.classTime.localeCompare(b.classTime));
+    if (!rows.length) return '<div style="font-size:13px;color:var(--ink-light);padding:8px 0;">No active classes for this session.</div>';
+    return '<div class="table-wrap"><table><thead><tr><th>Teacher</th><th>Class Level</th><th>Class Time</th><th style="text-align:center;">Students</th></tr></thead><tbody>' +
+      rows.map(r => '<tr><td style="font-weight:500;">' + escHtml(r.teacher) + '</td><td>' + escHtml(r.classLevel) + '</td><td>' + escHtml(r.classTime) + '</td><td style="text-align:center;"><span class="badge badge-active">' + r.count + '</span></td></tr>').join('') +
+      '</tbody></table></div>';
+  })();
+
   const html = `
     ${_motd ? `
       <div style="background:var(--orange-light); border-left:4px solid var(--orange); border-radius:var(--radius-md); padding:10px 16px; margin-bottom:16px; display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
@@ -1536,12 +1623,12 @@ function renderDashboard() {
         </div>
       </div>
     ` : ''}
-    <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+    <div class="page-header" style="position:relative; display:flex; align-items:center; flex-wrap:wrap; gap:12px;">
       <div>
         <div class="page-title">Dashboard</div>
         <div class="page-subtitle">Current session: <strong>${activeSess?.name || 'None'}</strong></div>
       </div>
-      <div onclick="filterByStatus('Active')" style="cursor:pointer;background:var(--olive-pale);border:2px solid var(--olive);border-radius:var(--radius-md);padding:10px 24px;text-align:center;min-width:100px;">
+      <div onclick="filterByStatus('Active')" style="position:absolute; left:50%; transform:translateX(-50%); cursor:pointer;background:var(--olive-pale);border:2px solid var(--olive);border-radius:var(--radius-md);padding:10px 24px;text-align:center;min-width:100px;">
         <div style="font-size:42px;font-weight:700;color:var(--olive);line-height:1;">${counts['Active']}</div>
         <div style="font-size:11px;color:var(--olive);text-transform:uppercase;letter-spacing:0.08em;margin-top:4px;font-weight:600;">Active students</div>
       </div>
@@ -1561,83 +1648,68 @@ function renderDashboard() {
       </div>
     </div>
 
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:4px;">
-      <div class="card">
-        <div class="card-title">Sessions overview</div>
-        <table>
-          <thead><tr><th>Session</th><th>Fees</th><th>Dates</th><th>Status</th></tr></thead>
-          <tbody>
-            ${sessions.map(s => `
-              <tr>
-                <td style="font-weight:500;">${s.name}</td>
-                <td>$${s.fees}</td>
-                <td>${s.classDates?.length || 0} days</td>
-                <td><span class="badge ${s.enrollmentOpen ? 'badge-active' : 'badge-alumni'}">${s.enrollmentOpen ? 'Open' : 'Closed'}</span></td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
+    ${currentUser.role === 'teacher' ? `
+      <div class="card" style="margin-top:4px;">
+        <div class="card-title">Classes overview</div>
+        ${classesOverviewHtml}
       </div>
-      <div class="card">
-        ${currentUser.role === 'teacher' ? `
+    ` : `
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:4px;">
+        <div class="card">
           <div class="card-title">Classes overview</div>
-          ${(() => {
-            const sessName = activeSess?.name;
-            const students = allStudents.filter(s => s.status === 'Active');
-            // Build class groupings: key = teacher|classLevel|classTime
-            const classMap = {};
-            students.forEach(s => {
-              const sd = (s.sessionData || []).find(d => d.session === sessName);
-              if (!sd || !sd.teacher) return;
-              const key = (sd.teacher || '') + '|' + (sd.classLevel || '') + '|' + (sd.classTime || '');
-              if (!classMap[key]) classMap[key] = { teacher: sd.teacher, classLevel: sd.classLevel || '—', classTime: sd.classTime || '—', count: 0 };
-              classMap[key].count++;
-            });
-            const rows = Object.values(classMap).sort((a,b) => a.teacher.localeCompare(b.teacher) || a.classTime.localeCompare(b.classTime));
-            if (!rows.length) return '<div style="font-size:13px;color:var(--ink-light);padding:8px 0;">No active classes for this session.</div>';
-            return '<div class="table-wrap"><table><thead><tr><th>Teacher</th><th>Class Level</th><th>Class Time</th><th style="text-align:center;">Students</th></tr></thead><tbody>' +
-              rows.map(r => '<tr><td style="font-weight:500;">' + escHtml(r.teacher) + '</td><td>' + escHtml(r.classLevel) + '</td><td>' + escHtml(r.classTime) + '</td><td style="text-align:center;"><span class="badge badge-active">' + r.count + '</span></td></tr>').join('') +
-              '</tbody></table></div>';
-          })()}
-        ` : `
-          <div class="card-title">Quick actions</div>
-          <div style="display:flex; flex-direction:column; gap:10px;">
-            ${currentUser.role === 'admin' ? `
-            <button class="btn btn-secondary w-full" onclick="navigateTo('add-student')" style="justify-content:flex-start; gap:10px;">
-              ➕ Add new student
-            </button>` : ''}
-            <button class="btn btn-secondary w-full" onclick="navigateTo('directory')" style="justify-content:flex-start; gap:10px;">
-              👥 View student directory
-            </button>
-            ${currentUser.role === 'admin' ? `
-              <button class="btn btn-secondary w-full" onclick="confirmSetAlumni()" style="justify-content:flex-start; gap:10px; border-color:var(--warning); color:var(--warning);">
-                🎓 Set all Active → Alumni
+          ${classesOverviewHtml}
+        </div>
+        <div style="display:flex; flex-direction:column; gap:14px;">
+          <div class="card">
+            <div class="card-title">Quick actions</div>
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              ${currentUser.role === 'admin' ? `
+              <button class="btn btn-secondary w-full" onclick="navigateTo('add-student')" style="justify-content:flex-start; gap:8px; padding:6px 12px; font-size:13px;">
+                ➕ Add new student
+              </button>` : ''}
+              <button class="btn btn-secondary w-full" onclick="navigateTo('directory')" style="justify-content:flex-start; gap:8px; padding:6px 12px; font-size:13px;">
+                👥 View student directory
               </button>
-              ${activeSess?.enrollmentOpen ? `
-                <button class="btn btn-primary w-full" onclick="openInviteReturningDialog()" style="justify-content:flex-start; gap:10px;">
-                  ✉️ Invite returning students
+              ${currentUser.role === 'admin' ? `
+                <button class="btn btn-secondary w-full" onclick="confirmSetAlumni()" style="justify-content:flex-start; gap:8px; padding:6px 12px; font-size:13px; border-color:var(--warning); color:var(--warning);">
+                  🎓 Set all Active → Alumni
                 </button>
+                ${activeSess?.enrollmentOpen ? `
+                  <button class="btn btn-primary w-full" onclick="openInviteReturningDialog()" style="justify-content:flex-start; gap:8px; padding:6px 12px; font-size:13px;">
+                    ✉️ Invite returning students
+                  </button>
+                ` : ''}
+                ${activeSess?.enrollmentOpen && activeSess?.term === 'Fall' ? `
+                  <button class="btn btn-secondary w-full" onclick="openBookNeedsDialog()" style="justify-content:flex-start; gap:8px; padding:6px 12px; font-size:13px; border-color:var(--teal,#1F6B75); color:var(--teal,#1F6B75);">
+                    📚 Check book needs
+                  </button>
+                ` : ''}
+                ${activeSess?.enrollmentOpen && (activeSess?.term === 'Winter' || activeSess?.term === 'Spring') ? `
+                  <button class="btn btn-primary w-full" onclick="openRollForwardDialog()" style="justify-content:flex-start; gap:8px; padding:6px 12px; font-size:13px;">
+                    ⏩ Roll Active students to ${activeSess?.name}
+                  </button>
+                ` : ''}
               ` : ''}
-              ${activeSess?.enrollmentOpen && activeSess?.term === 'Fall' ? `
-                <button class="btn btn-secondary w-full" onclick="openBookNeedsDialog()" style="justify-content:flex-start; gap:10px; border-color:var(--teal,#1F6B75); color:var(--teal,#1F6B75);">
-                  📚 Check book needs
-                </button>
-              ` : ''}
-              ${activeSess?.enrollmentOpen && (activeSess?.term === 'Winter' || activeSess?.term === 'Spring') ? `
-                <button class="btn btn-primary w-full" onclick="openRollForwardDialog()" style="justify-content:flex-start; gap:10px;">
-                  ⏩ Roll Active students to ${activeSess?.name}
-                </button>
-              ` : ''}
-            ` : ''}
-            <a href="https://portal.hindikineev.org/help.html" target="_blank"
-              class="btn btn-secondary w-full"
-              style="justify-content:flex-start; gap:10px; text-decoration:none;">
-              ❓ Help &amp; Checklist
-            </a>
+              <a href="https://portal.hindikineev.org/help.html" target="_blank"
+                class="btn btn-secondary w-full"
+                style="justify-content:flex-start; gap:8px; padding:6px 12px; font-size:13px; text-decoration:none;">
+                ❓ Help &amp; Checklist
+              </a>
+            </div>
           </div>
-        `}
+          ${isAdminView ? `
+            <div class="card">
+              <div class="card-title">Admin activity</div>
+              ${adminActivityHtml || '<div style="font-size:13px;color:var(--ink-light);padding:8px 0;">No admins found.</div>'}
+            </div>
+            <div class="card">
+              <div class="card-title">Teacher activity</div>
+              ${teacherActivityHtml || '<div style="font-size:13px;color:var(--ink-light);padding:8px 0;">No teachers yet.</div>'}
+            </div>
+          ` : ''}
+        </div>
       </div>
-    </div>
+    `}
 
     ${feesPending > 0 ? `
       <div style="margin-top:16px; background:var(--warning-light); border:1px solid rgba(192,120,0,0.3); border-radius:var(--radius-md); padding:14px 18px; display:flex; align-items:center; gap:12px;">
@@ -2111,6 +2183,7 @@ function renderStudentTable() {
     const sdB = (b.sessionData||[]).find(d => d.session === sesKeySort) || {};
     let va = '', vb = '';
     switch (currentSort.col) {
+      case 'id':      va = (a.studentId||'').toLowerCase(); vb = (b.studentId||'').toLowerCase(); break;
       case 'name':    va = (a.firstName+' '+a.lastName).toLowerCase(); vb = (b.firstName+' '+b.lastName).toLowerCase(); break;
       case 'parent':  va = (a.parentFirstName+' '+a.parentLastName).toLowerCase(); vb = (b.parentFirstName+' '+b.parentLastName).toLowerCase(); break;
       case 'status':  va = a.status||''; vb = b.status||''; break;
@@ -2415,17 +2488,34 @@ function openStudentModal(studentId) {
   const html = `
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title">${isNew ? 'Add student' : `${s.firstName} ${s.lastName}`}</div>
-        ${!isNew ? (() => {
-          const _recentSd = (s.sessionData||[]).slice().reverse().find(d => d.teacher || d.classLevel || d.classTime) || {};
-          const _statusClass = (s.status||'').toLowerCase().replace('-','').replace(' ','');
-          return `<div style="display:flex; align-items:center; gap:16px; font-size:16px; color:var(--ink-mid); flex-wrap:wrap;">
-            <span class="badge badge-${_statusClass}">${s.status||''}</span>
-            ${_recentSd.classLevel ? `<span>📚 ${escHtml(_recentSd.classLevel)}</span>` : ''}
-            ${_recentSd.teacher    ? `<span>👩‍🏫 ${escHtml(_recentSd.teacher)}</span>` : ''}
-            ${_recentSd.classTime  ? `<span>🕐 ${escHtml(_recentSd.classTime)}</span>` : ''}
-          </div>`;
-        })() : ''}
+        <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+          ${!isNew ? `
+            <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+              <div id="student-photo-thumb" style="width:56px; height:56px; border-radius:50%; background:var(--olive-pale); display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0; border:1px solid var(--olive-mid);">
+                <span style="font-size:22px; color:var(--olive-light);">👤</span>
+              </div>
+              ${isAdmin && s.status === 'Active' ? `
+                <label style="font-size:10px; color:var(--olive); cursor:pointer; text-decoration:underline; white-space:nowrap;">
+                  📷 ${s.photoPath ? 'Change' : 'Add'}
+                  <input type="file" accept="image/*" style="display:none;" onchange="handleStudentPhotoSelected(event, '${escAttr(s.id)}', '${escAttr(s.studentId||'')}')"/>
+                </label>
+              ` : ''}
+            </div>
+          ` : ''}
+          <div>
+            <div class="modal-title">${isNew ? 'Add student' : `${s.firstName} ${s.lastName}`}</div>
+            ${!isNew ? (() => {
+              const _recentSd = (s.sessionData||[]).slice().reverse().find(d => d.teacher || d.classLevel || d.classTime) || {};
+              const _statusClass = (s.status||'').toLowerCase().replace('-','').replace(' ','');
+              return `<div style="display:flex; align-items:center; gap:16px; font-size:16px; color:var(--ink-mid); flex-wrap:wrap;">
+                <span class="badge badge-${_statusClass}">${s.status||''}</span>
+                ${_recentSd.classLevel ? `<span>📚 ${escHtml(_recentSd.classLevel)}</span>` : ''}
+                ${_recentSd.teacher    ? `<span>👩‍🏫 ${escHtml(_recentSd.teacher)}</span>` : ''}
+                ${_recentSd.classTime  ? `<span>🕐 ${escHtml(_recentSd.classTime)}</span>` : ''}
+              </div>`;
+            })() : ''}
+          </div>
+        </div>
         <button class="modal-close" onclick="closeModal()">✕</button>
       </div>
       <div class="modal-body">
@@ -2593,6 +2683,9 @@ function openStudentModal(studentId) {
   `;
 
   showModal(html);
+  if (!isNew && s.photoPath) {
+    _loadStudentPhotoIntoModal(s.photoPath);
+  }
 
   // Open last session tab by default
   if (enrolledSessions.length > 0) switchSessTab(enrolledSessions[enrolledSessions.length - 1].name);
@@ -3740,7 +3833,7 @@ function renderSessions() {
 
 function renderSessionCard(sess) {
   const isAdmin = currentUser.role === 'admin';
-  const isCurrent = SessionEngine.getCurrentSession().name === sess.name;
+  const isCurrent = SessionEngine.getActiveSession().name === sess.name;
   return `
     <div class="card" style="${isCurrent ? 'border-color:var(--orange); border-width:2px;' : ''}">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px;">
@@ -3758,16 +3851,25 @@ function renderSessionCard(sess) {
           </div>
         </div>
       ` : ''}
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px;">
-        <div style="background:var(--olive-pale); border-radius:var(--radius-md); padding:10px 14px;">
-          <div style="font-size:11px; color:var(--ink-light); text-transform:uppercase; letter-spacing:0.05em;">Fees</div>
-          <div style="font-family:var(--serif); font-size:22px; color:var(--olive);">$${sess.fees}</div>
+      ${currentUser.role === 'teacher' ? `
+        <div style="margin-bottom:14px;">
+          <div style="background:var(--olive-pale); border-radius:var(--radius-md); padding:10px 14px;">
+            <div style="font-size:11px; color:var(--ink-light); text-transform:uppercase; letter-spacing:0.05em;">Class days</div>
+            <div style="font-family:var(--serif); font-size:22px; color:var(--olive);">${sess.classDates?.length || 0}</div>
+          </div>
         </div>
-        <div style="background:var(--olive-pale); border-radius:var(--radius-md); padding:10px 14px;">
-          <div style="font-size:11px; color:var(--ink-light); text-transform:uppercase; letter-spacing:0.05em;">Class days</div>
-          <div style="font-family:var(--serif); font-size:22px; color:var(--olive);">${sess.classDates?.length || 0}</div>
+      ` : `
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px;">
+          <div style="background:var(--olive-pale); border-radius:var(--radius-md); padding:10px 14px;">
+            <div style="font-size:11px; color:var(--ink-light); text-transform:uppercase; letter-spacing:0.05em;">Fees</div>
+            <div style="font-family:var(--serif); font-size:22px; color:var(--olive);">$${sess.fees}</div>
+          </div>
+          <div style="background:var(--olive-pale); border-radius:var(--radius-md); padding:10px 14px;">
+            <div style="font-size:11px; color:var(--ink-light); text-transform:uppercase; letter-spacing:0.05em;">Class days</div>
+            <div style="font-family:var(--serif); font-size:22px; color:var(--olive);">${sess.classDates?.length || 0}</div>
+          </div>
         </div>
-      </div>
+      `}
       ${isAdmin ? `
         <div style="display:flex; gap:8px; border-top:1px solid var(--olive-mid); padding-top:12px; margin-top:4px;">
           <button class="btn btn-secondary btn-sm" onclick="openSessionModal('${sess.name}')">✏️ Edit</button>
@@ -4004,10 +4106,135 @@ function renderAttributesPortal() {
   `;
 }
 
+// ── TEACHER PRESENCE DISPLAY HELPERS ─────────────────────────
+// Shared by the Teachers subtab and the admin Dashboard.
+const PRESENCE_ACTIVE_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
+
+// ── STUDENT PHOTOS ────────────────────────────────────────────
+async function _loadStudentPhotoIntoModal(photoPath) {
+  try {
+    const { data, error } = await _supabase.storage.from('student-photos').createSignedUrl(photoPath, 3600);
+    if (error || !data?.signedUrl) { console.warn('student photo signed URL:', error?.message); return; }
+    const el = document.getElementById('student-photo-thumb');
+    if (el) el.innerHTML = `<img src="${data.signedUrl}" style="width:100%; height:100%; object-fit:cover;" alt="Student photo"/>`;
+  } catch(e) {
+    console.warn('_loadStudentPhotoIntoModal:', e.message);
+  }
+}
+
+// Center-crops to a square using the shorter dimension, then resizes to
+// the target size. Returns both a Blob (for upload) and a data URL (for
+// immediate display without waiting on a signed-URL round-trip).
+function _resizeImageToSquare(file, size = 500) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const side = Math.min(img.width, img.height);
+      const sx = (img.width - side) / 2;
+      const sy = (img.height - side) / 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+      canvas.toBlob((blob) => {
+        if (blob) resolve({ blob, dataUrl: canvas.toDataURL('image/jpeg', 0.9) });
+        else reject(new Error('Could not process image'));
+      }, 'image/jpeg', 0.9);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not load image file')); };
+    img.src = url;
+  });
+}
+
+async function handleStudentPhotoSelected(event, internalId, studentId) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  if (!studentId) {
+    showToast('This student needs a Student ID before a photo can be added', 'error');
+    return;
+  }
+
+  try {
+    showToast('Uploading photo…', 'info');
+    const { blob, dataUrl } = await _resizeImageToSquare(file, 500);
+    const path = `${studentId}.jpg`;
+
+    const { error: uploadError } = await _supabase.storage
+      .from('student-photos')
+      .upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
+    if (uploadError) {
+      showToast('Upload failed: ' + uploadError.message, 'error');
+      return;
+    }
+
+    const s = DB.getStudent(internalId);
+    if (s) {
+      s.photoPath = path;
+      DB.saveStudent(s);
+    }
+
+    const el = document.getElementById('student-photo-thumb');
+    if (el) el.innerHTML = `<img src="${dataUrl}" style="width:100%; height:100%; object-fit:cover;" alt="Student photo"/>`;
+
+    showToast('Photo added', 'success');
+  } catch(e) {
+    console.warn('handleStudentPhotoSelected:', e.message);
+    showToast('Photo upload failed: ' + e.message, 'error');
+  }
+}
+
+async function _fetchTeacherPresence() {
+  let presenceMap = {};
+  try {
+    const { data, error } = await _supabase.from('teacher_presence').select('email, last_seen');
+    if (!error && data) {
+      data.forEach(row => { presenceMap[row.email.toLowerCase()] = row.last_seen; });
+    }
+  } catch(e) {
+    console.warn('teacher_presence fetch:', e.message);
+  }
+  return presenceMap;
+}
+
+async function _fetchAdminActivity() {
+  try {
+    const { data, error } = await _supabase.rpc('get_admin_activity');
+    if (error) { console.warn('get_admin_activity:', error.message); return []; }
+    return data || [];
+  } catch(e) {
+    console.warn('get_admin_activity:', e.message);
+    return [];
+  }
+}
+
+function formatLastActive(email, presenceMap) {
+  const lastSeen = presenceMap[(email || '').toLowerCase()];
+  if (!lastSeen) return '<span style="color:var(--ink-light);">Never active</span>';
+  const ageMs = Date.now() - new Date(lastSeen).getTime();
+  if (ageMs <= PRESENCE_ACTIVE_THRESHOLD_MS) {
+    return '<span style="color:var(--olive); font-weight:600;">🟢 Active now</span>';
+  }
+  const mins = Math.round(ageMs / 60000);
+  const label = mins < 60 ? `${mins}m ago` : mins < 1440 ? `${Math.round(mins/60)}h ago` : `${Math.round(mins/1440)}d ago`;
+  return `<span style="color:var(--ink-light);">Last seen ${label}</span>`;
+}
+
+function formatLastLogin(lastLogin) {
+  if (!lastLogin) return '<span style="color:var(--ink-light);">Never logged in</span>';
+  const d = new Date(lastLogin);
+  return `<span style="color:var(--ink-light);">Last login: ${d.toLocaleDateString('en-US', {month:'short', day:'numeric'})}, ${d.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'})}</span>`;
+}
+
 // ── Tab 2: Teachers ───────────────────────────────────────────
-function renderAttributesTeachers() {
+async function renderAttributesTeachers() {
   _currentAttrTab = 'teachers';
   const teachers = DB.getTeachers();
+  const presenceMap = await _fetchTeacherPresence();
+
   const teacherRows = teachers.map(t => {
     const key = encodeURIComponent(t.email || t.firstName);
     return `<div style="background:var(--olive-pale); border-radius:var(--radius-sm); padding:8px 10px; margin-bottom:6px;">
@@ -4019,6 +4246,10 @@ function renderAttributesTeachers() {
         <button class="btn-ghost btn-icon" style="padding:2px 6px; font-size:14px;" onclick="removeTeacher('${escAttr(t.email||t.firstName)}')">×</button>
       </div>
       <div style="font-size:11px; color:var(--ink-light); margin-top:2px;">${escHtml(t.phone||'')}</div>
+      <div style="display:flex; gap:14px; font-size:11px; margin-top:4px;">
+        <span>${formatLastActive(t.email, presenceMap)}</span>
+        <span>${formatLastLogin(t.lastLogin)}</span>
+      </div>
     </div>`;
   }).join('');
 
@@ -5019,6 +5250,7 @@ const SupabaseSync = {
         sessionData:          row.session_data   || [],
         statusHistory:        row.status_history || [],
         lastParentAccess:     row.last_parent_access || null,
+        photoPath:            row.photo_path || null,
       }));
 
       // ── Reassemble sessions — restore camelCase shape DB expects ──
@@ -5041,6 +5273,7 @@ const SupabaseSync = {
         email:     row.email       || '',
         phone:     row.phone       || '',
         role:      row.role        || 'teacher',
+        lastLogin: row.last_login  || null,
       }));
 
       // ── Reassemble lookup config → classLevels, bookLevels, etc. ──
@@ -5343,6 +5576,7 @@ const SupabaseSync = {
       session_data:           s.sessionData           || [],
       status_history:         s.statusHistory         || [],
       last_parent_access:     s.lastParentAccess      || null,
+      photo_path:             s.photoPath             || null,
       updated_at:             new Date().toISOString(),
     };
   },
