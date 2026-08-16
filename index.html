@@ -666,6 +666,14 @@ const _cache = {
 };
 
 const STUDENT_STATUSES = ['Interest','Invited','In-Process','Active','Alumni','Graduated','Dropped'];
+
+// Pre-composed message used by the "Email these parents" button on the
+// Dashboard's Parent Check-In chart — auto-fills Subject/Body when
+// arriving via that specific flow (see emailParentCheckinBucket()).
+const CHECKIN_REMINDER_TEMPLATE = {
+  subject: "A quick update on {{studentFirstName}}'s progress is waiting on the HKN Portal",
+  body: "Dear {{parentFirstName}},<br><br>We wanted to reach out because it's been a little while since you last checked in on {{studentFirstName}}'s notes on the HKN Portal. {{teacher}} has been adding homework and specific notes for {{studentFirstName}}, and checking in regularly is a great way to help {{studentFirstName}} keep making progress in learning Hindi.<br><br>When you log in, you'll need the same 4 details you provided during enrollment. If you run into any trouble accessing the portal, just reach out to info@hindikineev.org and we'll be happy to help.<br><br>Thank you for being part of {{studentFirstName}}'s Hindi learning journey!<br><br>Warm regards,<br>The HKN Team",
+};
 const SESSION_TERMS    = ['Fall','Winter','Spring'];
 
 // ── SESSION ENGINE ───────────────────────────────────────────
@@ -1163,7 +1171,7 @@ function seedStudentsIfEmpty() {
 // in the top nav bar and checkable via console (APP_VERSION), so
 // it's always possible to tell which version a saved file or a
 // deployed site is actually running. Format: v<date>.<n>
-const APP_VERSION = 'v2026-08-14.1';
+const APP_VERSION = 'v2026-08-16.5';
 
 // ── STATE ────────────────────────────────────────────────────
 // Device detection — set once at boot, used for mobile-specific behavior
@@ -1172,7 +1180,9 @@ const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
 let currentUser = null; // { email, role }
 let currentStudentFilter = {};
 let currentSort = { col: 'name', dir: 'asc' }; // directory sort state
-let _feeReminderIds = []; // student IDs pre-selected from fees tracker
+let _emailPreselectIds = []; // student IDs pre-selected from fees tracker (or other sources)
+let _emailPreselectLabel = ''; // describes why, shown in the Send Email banner
+let _emailPreselectTemplate = null; // { subject, body } to auto-fill, one-time use
 
 // Replaces all window._* globals with a single managed state object
 const AppState = {
@@ -1376,6 +1386,7 @@ function backToLogin() {
 // so this naturally goes stale within ~2 min of someone stepping away,
 // even without an auto-logout timer.
 let _presenceHeartbeatTimer = null;
+let _parentCheckinBuckets = {}; // set by renderDashboard's chart, read by showParentCheckinBucket
 
 async function _updatePresence() {
   if (!currentUser) return;
@@ -1646,6 +1657,84 @@ async function renderDashboard() {
         <div class="stat-label">Total</div>
         <div class="stat-sublabel">All students</div>
       </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-title">Parent Portal Check-In — Days Since Last Visit</div>
+      ${(() => {
+        const students = allStudents.filter(s => s.status === 'Active');
+        if (!students.length) return '<div style="font-size:13px;color:var(--ink-light);padding:8px 0;">No active students yet.</div>';
+
+        const CAP_DAYS = 21; // individual bars for 0..20, then a 21+ bucket, then Never
+        const today = new Date(); today.setHours(0,0,0,0);
+        const dayBuckets = {}; // bucket -> array of {studentName, parentName}
+        const neverList = [];
+
+        students.forEach(s => {
+          const entry = {
+            id: s.id,
+            studentName: `${s.firstName || ''} ${s.lastName || ''}`.trim(),
+            parentName: `${s.parentFirstName || ''} ${s.parentLastName || ''}`.trim() || '—',
+          };
+          if (!s.lastParentAccess) { neverList.push(entry); return; }
+          const lastVisit = new Date(s.lastParentAccess); lastVisit.setHours(0,0,0,0);
+          const daysAgo = Math.max(0, Math.floor((today - lastVisit) / 86400000));
+          const bucket = daysAgo >= CAP_DAYS ? CAP_DAYS : daysAgo;
+          if (!dayBuckets[bucket]) dayBuckets[bucket] = [];
+          dayBuckets[bucket].push(entry);
+        });
+
+        const bars = [];
+        for (let d = 0; d < CAP_DAYS; d++) bars.push({ label: String(d), list: dayBuckets[d] || [], tier: d <= 6 ? 'good' : 'warn' });
+        bars.push({ label: CAP_DAYS + '+', list: dayBuckets[CAP_DAYS] || [], tier: 'bad' });
+        bars.push({ label: 'Never', list: neverList, tier: 'bad' });
+
+        // Store full per-bucket lists in a global lookup, keyed by label,
+        // so the click handler can retrieve names without needing to
+        // serialize a whole array through an inline onclick attribute.
+        _parentCheckinBuckets = {};
+        bars.forEach(b => { _parentCheckinBuckets[b.label] = b.list; });
+
+        const maxCount = Math.max(1, ...bars.map(b => b.list.length));
+        const tierColor = { good: 'var(--success)', warn: '#E8A33D', bad: 'var(--danger)' };
+
+        const chartW = 900, chartH = 200, padL = 30, padB = 30, padT = 10;
+        const plotW = chartW - padL - 10, plotH = chartH - padB - padT;
+        const barW = plotW / bars.length;
+
+        const barsSvg = bars.map((b, i) => {
+          const count = b.list.length;
+          const h = (count / maxCount) * plotH;
+          const x = padL + i * barW;
+          const y = padT + (plotH - h);
+          const showLabel = (i % 2 === 0) || i >= CAP_DAYS; // thin out day labels to avoid crowding, always show 21+/Never
+          const clickable = count > 0;
+          return `
+            <rect x="${x + barW*0.15}" y="${y}" width="${barW*0.7}" height="${h}" fill="${tierColor[b.tier]}" rx="2"
+              ${clickable ? `style="cursor:pointer;" onclick="showParentCheckinBucket('${escAttr(b.label)}')"` : ''}>
+              ${clickable ? `<title>Click to see who's in this group</title>` : ''}
+            </rect>
+            ${count > 0 ? `<text x="${x + barW/2}" y="${y - 4}" font-size="10" text-anchor="middle" fill="var(--ink-mid)" ${clickable ? `style="cursor:pointer;" onclick="showParentCheckinBucket('${escAttr(b.label)}')"` : ''}>${count}</text>` : ''}
+            ${showLabel ? `<text x="${x + barW/2}" y="${chartH - padB + 14}" font-size="9" text-anchor="middle" fill="var(--ink-light)">${b.label}</text>` : ''}
+          `;
+        }).join('');
+
+        return `
+          <div style="font-size:12px; color:var(--ink-light); margin-bottom:10px;">
+            ${students.length} active students &nbsp;\u00b7&nbsp;
+            <span style="color:${tierColor.good};">\u25CF 0\u20136 days</span> &nbsp;
+            <span style="color:${tierColor.warn};">\u25CF 7\u201320 days</span> &nbsp;
+            <span style="color:${tierColor.bad};">\u25CF 21+ days / never</span>
+            &nbsp;\u00b7&nbsp; <span style="font-style:italic;">click a bar to see names</span>
+          </div>
+          <svg viewBox="0 0 ${chartW} ${chartH}" style="width:100%; height:auto; max-height:220px;">
+            <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${chartH-padB}" stroke="var(--olive-mid)" stroke-width="1"/>
+            <line x1="${padL}" y1="${chartH-padB}" x2="${chartW-10}" y2="${chartH-padB}" stroke="var(--olive-mid)" stroke-width="1"/>
+            ${barsSvg}
+          </svg>
+          <div style="font-size:11px; color:var(--ink-light); margin-top:4px;">Days since last portal visit \u2192</div>
+        `;
+      })()}
     </div>
 
     ${currentUser.role === 'teacher' ? `
@@ -3428,7 +3517,8 @@ function feeUpdateCount() {
 function feesSendReminders() {
   const ids = Array.from(document.querySelectorAll('.fee-remind-cb:checked')).map(cb => cb.value);
   if (ids.length === 0) { showToast('Select at least one student to send reminders', 'warning'); return; }
-  _feeReminderIds = ids;
+  _emailPreselectIds = ids;
+  _emailPreselectLabel = 'with unpaid fees from Fees tracker';
   navigateTo('email');
 }
 
@@ -4111,6 +4201,57 @@ function renderAttributesPortal() {
 const PRESENCE_ACTIVE_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
 
 // ── STUDENT PHOTOS ────────────────────────────────────────────
+// ── PARENT CHECK-IN CHART DRILL-DOWN ─────────────────────────────
+function showParentCheckinBucket(label) {
+  const list = _parentCheckinBuckets[label] || [];
+  const dayDesc = label === 'Never' ? 'have never checked in'
+    : label.endsWith('+') ? `last checked in ${label} days ago (or more)`
+    : label === '0' ? 'checked in today'
+    : `last checked in ${label} day${label === '1' ? '' : 's'} ago`;
+
+  const html = `
+    <div class="modal" style="max-width:440px;">
+      <div class="modal-header">
+        <div class="modal-title">${list.length} parent${list.length !== 1 ? 's' : ''}</div>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="font-size:13px; color:var(--ink-mid); margin-bottom:14px;">
+          Students whose parent ${escHtml(dayDesc)}:
+        </div>
+        ${list.length ? `
+          <div style="display:flex; flex-direction:column; gap:2px;">
+            ${list.map(entry => `
+              <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--cream-dark); font-size:13px;">
+                <span style="font-weight:500;">${escHtml(entry.studentName)}</span>
+                <span style="color:var(--ink-light);">${escHtml(entry.parentName)}</span>
+              </div>
+            `).join('')}
+          </div>
+        ` : '<div style="font-size:13px;color:var(--ink-light);">No students in this group.</div>'}
+      </div>
+      <div class="modal-footer">
+        ${(currentUser.role === 'admin' && list.length > 0) ? `
+          <button class="btn btn-primary" onclick="emailParentCheckinBucket('${escAttr(label)}')">✉️ Email these parents</button>
+        ` : ''}
+        <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+      </div>
+    </div>`;
+  showModal(html);
+}
+
+function emailParentCheckinBucket(label) {
+  const list = _parentCheckinBuckets[label] || [];
+  if (!list.length) return;
+  _emailPreselectIds = list.map(entry => entry.id);
+  _emailPreselectLabel = label === 'Never'
+    ? 'who have never checked in to the parent portal'
+    : `who haven't checked in for ${label}${label.endsWith('+') ? '' : ' days'}`;
+  _emailPreselectTemplate = CHECKIN_REMINDER_TEMPLATE;
+  closeModal();
+  navigateTo('email');
+}
+
 async function _loadStudentPhotoIntoModal(photoPath) {
   try {
     const { data, error } = await _supabase.storage.from('student-photos').createSignedUrl(photoPath, 3600);
@@ -5676,7 +5817,7 @@ function renderEmail() {
       <div class="card">
         <div class="card-title">Recipients</div>
         <div class="filter-bar" style="margin-bottom:12px;">
-          <select class="form-select" id="email-filter-status" onchange="_feeReminderIds=[];loadEmailRecipients()">
+          <select class="form-select" id="email-filter-status" onchange="_emailPreselectIds=[];loadEmailRecipients()">
             <option value="">All statuses</option>
             ${STUDENT_STATUSES.map(s => `<option value="${s}">${s}</option>`).join('')}
           </select>
@@ -5799,21 +5940,29 @@ function renderEmail() {
     </div>
   `;
   document.getElementById('content-area').innerHTML = html;
-  // Show banner if arriving from fees tracker
-  if (_feeReminderIds.length > 0) {
+  // Show banner if arriving with pre-selected students from anywhere
+  if (_emailPreselectIds.length > 0) {
     const banner = document.createElement('div');
     banner.id = 'fee-reminder-banner';
     banner.style.cssText = 'background:var(--orange-light);border:1px solid rgba(242,125,38,0.3);border-radius:var(--radius-md);padding:10px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--orange-dark);';
-    banner.innerHTML = `<span>💰 Pre-selected <strong>${_feeReminderIds.length} student${_feeReminderIds.length !== 1 ? 's' : ''}</strong> with unpaid fees from Fees tracker</span>
-      <button class="btn btn-ghost btn-sm" onclick="_feeReminderIds=[];renderEmail();" style="color:var(--orange-dark);font-size:11px;">✕ Clear</button>`;
+    banner.innerHTML = `<span>📌 Pre-selected <strong>${_emailPreselectIds.length} student${_emailPreselectIds.length !== 1 ? 's' : ''}</strong>${_emailPreselectLabel ? ' ' + escHtml(_emailPreselectLabel) : ''}</span>
+      <button class="btn btn-ghost btn-sm" onclick="_emailPreselectIds=[];_emailPreselectLabel='';renderEmail();" style="color:var(--orange-dark);font-size:11px;">✕ Clear</button>`;
     const contentArea = document.getElementById('content-area');
     contentArea.insertBefore(banner, contentArea.firstChild);
+  }
+  // Auto-fill subject/body if arriving with a pre-set template (one-time use)
+  if (_emailPreselectTemplate) {
+    const subjEl = document.getElementById('email-subject');
+    const bodyEl = document.getElementById('email-body');
+    if (subjEl) subjEl.value = _emailPreselectTemplate.subject;
+    if (bodyEl) bodyEl.innerHTML = _emailPreselectTemplate.body;
+    _emailPreselectTemplate = null;
   }
   // Default to Active status and current session
   const _eSess = (SessionEngine.getActiveSession() || DB.getSessions().slice(-1)[0])?.name || '';
   const _eStat = document.getElementById('email-filter-status');
   const _eSession = document.getElementById('email-filter-session');
-  if (_eStat && !_feeReminderIds.length) _eStat.value = 'Active';
+  if (_eStat && !_emailPreselectIds.length) _eStat.value = 'Active';
   if (_eSession && _eSess) _eSession.value = _eSess;
   loadEmailRecipients();
   updateGmailAuthStatus();
@@ -5861,8 +6010,8 @@ function loadEmailRecipients() {
   const isTeacher = currentUser.role === 'teacher';
   let students = DB.searchStudents({ status, session, teacher, classLevel }).filter(s => s.parentEmail);
   // If arriving from fees tracker, pre-filter to selected students only
-  if (_feeReminderIds.length > 0) {
-    students = students.filter(s => _feeReminderIds.includes(s.id));
+  if (_emailPreselectIds.length > 0) {
+    students = students.filter(s => _emailPreselectIds.includes(s.id));
   }
   // Teachers only see parents of their own students in the selected (or active) session
   if (isTeacher) {
