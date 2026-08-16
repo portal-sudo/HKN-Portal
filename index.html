@@ -5770,6 +5770,7 @@ function renderEmail() {
             </select>
           </div>
           <div id="email-body" contenteditable="true"
+            onblur="_saveEditableSelection('email-body')"
             data-placeholder="Dear {{parentFirstName}}, We are pleased to invite your child {{studentFirstName}} to enroll in {{sessionName}}…"
             style="min-height:140px; padding:10px 12px; border:1px solid var(--olive-mid); border-radius:var(--radius-md); font-size:14px; line-height:1.6; color:var(--ink); background:white; outline:none; overflow-y:auto;">
           </div>
@@ -5915,11 +5916,42 @@ function emailFormat(cmd, val) {
   document.execCommand(cmd, false, val || null);
 }
 
+// ── PLACEHOLDER INSERTION AT CURSOR ─────────────────────────────
+// Clicking a placeholder chip moves focus away from the contenteditable
+// body, which causes the browser to lose track of exactly where the
+// cursor was — simply re-focusing afterward doesn't restore that
+// position, it just defaults to the very start. Fix: save the cursor
+// position on blur (the moment focus leaves the field, right as a chip
+// gets clicked), then explicitly restore that exact position before
+// inserting, rather than just re-focusing and hoping.
+const _lastEditableSelection = {};
+
+function _saveEditableSelection(fieldId) {
+  const sel = window.getSelection();
+  if (sel.rangeCount === 0) return;
+  const range = sel.getRangeAt(0);
+  const el = document.getElementById(fieldId);
+  if (el && el.contains(range.commonAncestorContainer)) {
+    _lastEditableSelection[fieldId] = range.cloneRange();
+  }
+}
+
+function _insertAtSavedPosition(fieldId, text) {
+  const el = document.getElementById(fieldId);
+  if (!el) return;
+  el.focus();
+  const saved = _lastEditableSelection[fieldId];
+  if (saved) {
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(saved);
+  }
+  document.execCommand('insertText', false, text);
+  _saveEditableSelection(fieldId); // update saved position to right after the insert
+}
+
 function insertPlaceholder(ph) {
-  const body = document.getElementById('email-body');
-  if (!body) return;
-  body.focus();
-  document.execCommand('insertText', false, ph);
+  _insertAtSavedPosition('email-body', ph);
 }
 
 async function sendEmailGmail() {
@@ -6232,6 +6264,7 @@ function renderTemplateEditor(tmpl) {
             </select>
           </div>
           <div id="te-body" contenteditable="true"
+            onblur="_saveEditableSelection('te-body')"
             data-placeholder="Dear {{parentFirstName}}, …"
             style="min-height:200px; padding:10px 12px; border:1px solid var(--olive-mid); border-radius:var(--radius-md); font-size:14px; line-height:1.6; color:var(--ink); background:white; outline:none; overflow-y:auto;">
           </div>
@@ -6254,10 +6287,7 @@ function teFormat(cmd, val) {
 }
 
 function insertTmplPlaceholder(fieldId, ph) {
-  const el = document.getElementById(fieldId);
-  if (!el) return;
-  el.focus();
-  document.execCommand('insertText', false, ph);
+  _insertAtSavedPosition(fieldId, ph);
 }
 
 function saveTemplateFromEditor(existingId) {
