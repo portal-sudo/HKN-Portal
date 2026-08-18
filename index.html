@@ -1168,7 +1168,7 @@ function seedStudentsIfEmpty() {
 // in the top nav bar and checkable via console (APP_VERSION), so
 // it's always possible to tell which version a saved file or a
 // deployed site is actually running. Format: v<date>.<n>
-const APP_VERSION = 'v2026-08-17.9';
+const APP_VERSION = 'v2026-08-18.1';
 
 // ── STATE ────────────────────────────────────────────────────
 // Device detection — set once at boot, used for mobile-specific behavior
@@ -1194,6 +1194,7 @@ const AppState = {
   resetModal() {
     this.modalScores       = {};
     this.pendingAttendance = {};
+    this.pendingHomework   = {};
     this.pendingSave       = null;
   },
   resetImport() {
@@ -2576,6 +2577,33 @@ function openStudentModal(studentId) {
               <span>? = Unmarked</span>
             </div>
           </div>
+          <div style="margin-top:14px;">
+            <label class="form-label">Homework Completed</label>
+            <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+              ${sess.classDates.map(date => {
+                const hw = (sd.homeworkDone || {})[date] || 'unknown';
+                const hwColors = { yes:'var(--success)', no:'var(--danger)', unknown:'var(--ink-light)' };
+                const hwLabels = { yes:'Y', no:'N', unknown:'?' };
+                const canMark = isAdmin || teacherCanEdit;
+                return `<div style="display:flex; flex-direction:column; align-items:center; gap:3px;">
+                  <div style="font-size:10px; color:var(--ink-light);">${date.slice(5)}</div>
+                  ${canMark ? `
+                    <select onchange="setHomeworkDone('${sess.name}','${date}',this.value,this)"
+                      style="width:52px; padding:3px 2px; border-radius:6px; font-size:11px; font-weight:600; border:1.5px solid ${hwColors[hw]}; color:${hwColors[hw]}; background:white; text-align:center; cursor:pointer;">
+                      <option value="unknown" ${hw==='unknown'?'selected':''}>?</option>
+                      <option value="yes"     ${hw==='yes'    ?'selected':''}>Y ✓</option>
+                      <option value="no"      ${hw==='no'     ?'selected':''}>N ✗</option>
+                    </select>` : `
+                    <div style="width:52px; height:28px; border-radius:6px; border:1.5px solid ${hwColors[hw]}; color:${hwColors[hw]}; background:white; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center;">${hwLabels[hw]}</div>`}
+                </div>`;
+              }).join('')}
+            </div>
+            <div style="display:flex; gap:12px; margin-top:8px; font-size:11px; color:var(--ink-light);">
+              <span style="color:var(--success);">Y = Yes</span>
+              <span style="color:var(--danger);">N = No</span>
+              <span>? = Unmarked</span>
+            </div>
+          </div>
         ` : ''}
       </div>
     `;
@@ -2615,6 +2643,10 @@ function openStudentModal(studentId) {
         <button class="modal-close" onclick="closeModal()">✕</button>
       </div>
       <div class="modal-body">
+        <details style="margin-bottom:20px;">
+          <summary style="cursor:pointer; font-size:13px; color:var(--olive); font-weight:700; padding:10px 0; user-select:none; text-transform:uppercase; letter-spacing:0.06em;">
+            ▸ Bio-data
+          </summary>
         <!-- BIO INFO -->
         <div style="background:var(--olive-pale); border-radius:var(--radius-md); padding:14px 18px; margin-bottom:20px;">
           <div style="font-size:11px; font-weight:700; color:var(--olive-light); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:12px;">Student information</div>
@@ -2754,6 +2786,7 @@ function openStudentModal(studentId) {
             : ''
           }
         </div>
+        </details>
 
         <!-- SESSION DATA TABS -->
         <div>
@@ -3037,6 +3070,19 @@ function saveStudentModal(existingId) {
       }
     });
     AppState.pendingAttendance = {};
+  }
+
+  // Apply any pending homework-completed changes from the modal dropdowns
+  if (AppState.pendingHomework) {
+    Object.entries(AppState.pendingHomework).forEach(([key, val]) => {
+      const [sn, dt] = key.split('|');
+      const sdIdx = updated.sessionData.findIndex(sd => sd.session === sn);
+      if (sdIdx >= 0) {
+        if (!updated.sessionData[sdIdx].homeworkDone) updated.sessionData[sdIdx].homeworkDone = {};
+        updated.sessionData[sdIdx].homeworkDone[dt] = val;
+      }
+    });
+    AppState.pendingHomework = {};
   }
 
   // Issue 3 warning: admin manually set status to Active but current session is incomplete
@@ -6589,6 +6635,14 @@ function setAttendance(sessName, date, val, selectEl) {
   if (selectEl) { selectEl.style.borderColor = c; selectEl.style.color = c; }
 }
 
+function setHomeworkDone(sessName, date, val, selectEl) {
+  AppState.pendingHomework = AppState.pendingHomework || {};
+  AppState.pendingHomework[sessName + '|' + date] = val;
+  const colors = { yes:'var(--success)', no:'var(--danger)', unknown:'var(--ink-light)' };
+  const c = colors[val] || colors.unknown;
+  if (selectEl) { selectEl.style.borderColor = c; selectEl.style.color = c; }
+}
+
 // ── ATTENDANCE MARKING SCREEN ─────────────────────────────────
 function renderAttendance() {
   const sessions  = DB.getSessions();
@@ -6641,7 +6695,7 @@ function renderAttendance() {
       <button class="btn btn-success btn-sm" onclick="markAllAttendance('present')">✓ All present</button>
       <button class="btn btn-danger btn-sm" onclick="markAllAttendance('absent')">✗ All absent</button>
       <div style="flex:1;"></div>
-      <button class="btn btn-primary" onclick="saveAttendanceBatch()">💾 Save attendance</button>
+      <button class="btn btn-primary" onclick="saveAttendanceBatch()">💾 Save All</button>
     </div>
 
     <div id="att-table-area">
@@ -6742,11 +6796,13 @@ function loadAttendanceClass() {
   const rows = students.map(s => {
     const sd  = (s.sessionData || []).find(d => d.session === sessName) || {};
     const att = (sd.attendance || {})[date] || 'unmarked';
+    const hw  = (sd.homeworkDone || {})[date] || 'unknown';
     // Teacher can only mark attendance for their own students
     const isOwn = !isTeacherRole || (sd.teacher || '').toLowerCase().includes(
       (currentUser.name || '').split(' ')[0].toLowerCase()
     );
     const attLabel = { present: '✓ Present', absent: '✗ Absent', vacation: '~ Vacation', unmarked: '— Unmarked' };
+    const hwLabel = { yes: '✓ Yes', no: '✗ No', unknown: '— Unmarked' };
     return `
       <tr id="att-row-${s.id}" style="${!isOwn ? 'opacity:0.6;' : ''}">
         <td style="font-weight:500;">
@@ -6779,6 +6835,22 @@ function loadAttendanceClass() {
                 border-color:var(--warning);">~ Vacation</button>
           </div>` : `<span style="font-size:12px; color:var(--ink-light);">${attLabel[att] || att}</span>`}
         </td>
+        <td>
+          ${isOwn ? `<div style="display:flex; gap:6px;">
+            <button onclick="setHwBatch('${s.id}','${sessName}','${date}','yes')"
+              class="hw-btn" data-student="${s.id}" data-val="yes"
+              style="padding:5px 12px; border-radius:6px; font-size:12px; font-weight:600; border:1.5px solid; cursor:pointer;
+                background:${hw==='yes'?'var(--success)':'white'};
+                color:${hw==='yes'?'white':'var(--success)'};
+                border-color:var(--success);">✓ Yes</button>
+            <button onclick="setHwBatch('${s.id}','${sessName}','${date}','no')"
+              class="hw-btn" data-student="${s.id}" data-val="no"
+              style="padding:5px 12px; border-radius:6px; font-size:12px; font-weight:600; border:1.5px solid; cursor:pointer;
+                background:${hw==='no'?'var(--danger)':'white'};
+                color:${hw==='no'?'white':'var(--danger)'};
+                border-color:var(--danger);">✗ No</button>
+          </div>` : `<span style="font-size:12px; color:var(--ink-light);">${hwLabel[hw] || hw}</span>`}
+        </td>
       </tr>`;
   }).join('');
 
@@ -6789,7 +6861,7 @@ function loadAttendanceClass() {
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Student</th><th>Teacher</th><th>Attendance</th></tr></thead>
+          <thead><tr><th>Student</th><th>Teacher</th><th>Attendance</th><th>Homework</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
@@ -6797,10 +6869,13 @@ function loadAttendanceClass() {
 
   // Store current batch state
   AppState.attBatch = {};
+  AppState.hwBatch = {};
   students.forEach(s => {
     const sd  = (s.sessionData || []).find(d => d.session === sessName) || {};
     const att = (sd.attendance || {})[date] || 'unmarked';
+    const hw  = (sd.homeworkDone || {})[date] || 'unknown';
     AppState.attBatch[s.id] = att;
+    AppState.hwBatch[s.id] = hw;
   });
 }
 
@@ -6811,6 +6886,20 @@ function setAttBatch(studentId, sessName, date, value) {
   // Update button styles for this student's row
   const colorMap = { present:'var(--success)', absent:'var(--danger)', vacation:'var(--warning)' };
   document.querySelectorAll(`[data-student="${studentId}"].att-btn`).forEach(btn => {
+    const val = btn.getAttribute('data-val');
+    const active = val === value;
+    btn.style.background = active ? colorMap[val] : 'white';
+    btn.style.color = active ? 'white' : colorMap[val];
+  });
+}
+
+function setHwBatch(studentId, sessName, date, value) {
+  AppState.hwBatch = AppState.hwBatch || {};
+  AppState.hwBatch[studentId] = value;
+
+  // Update button styles for this student's row
+  const colorMap = { yes:'var(--success)', no:'var(--danger)' };
+  document.querySelectorAll(`[data-student="${studentId}"].hw-btn`).forEach(btn => {
     const val = btn.getAttribute('data-val');
     const active = val === value;
     btn.style.background = active ? colorMap[val] : 'white';
@@ -6839,23 +6928,38 @@ function saveAttendanceBatch() {
   const today = new Date().toISOString().slice(0,10);
   if (date > today) { showToast('Cannot mark attendance for future dates', 'error'); return; }
 
+  const studentIds = new Set([
+    ...Object.keys(AppState.attBatch || {}),
+    ...Object.keys(AppState.hwBatch || {}),
+  ]);
+
   let saved = 0;
-  Object.entries(AppState.attBatch).forEach(([studentId, value]) => {
+  studentIds.forEach(studentId => {
     const student = DB.getStudent(studentId);
     if (!student) return;
     const sdIdx = (student.sessionData || []).findIndex(sd => sd.session === sessName);
     if (sdIdx < 0) return;
-    if (!student.sessionData[sdIdx].attendance) student.sessionData[sdIdx].attendance = {};
-    student.sessionData[sdIdx].attendance[date] = value;
+
+    const attValue = AppState.attBatch?.[studentId];
+    if (attValue !== undefined) {
+      if (!student.sessionData[sdIdx].attendance) student.sessionData[sdIdx].attendance = {};
+      student.sessionData[sdIdx].attendance[date] = attValue;
+    }
+    const hwValue = AppState.hwBatch?.[studentId];
+    if (hwValue !== undefined) {
+      if (!student.sessionData[sdIdx].homeworkDone) student.sessionData[sdIdx].homeworkDone = {};
+      student.sessionData[sdIdx].homeworkDone[date] = hwValue;
+    }
+
     DB.saveStudent(student);
     saved++;
   });
 
-  showToast(`Attendance saved for ${saved} student${saved!==1?'s':''} on ${date}`, 'success');
+  showToast(`Saved for ${saved} student${saved!==1?'s':''} on ${date}`, 'success');
 
   // Flash the save button
   const btn = document.querySelector('[onclick="saveAttendanceBatch()"]');
-  if (btn) { btn.textContent = '✅ Saved!'; setTimeout(() => btn.textContent = '💾 Save attendance', 2000); }
+  if (btn) { btn.textContent = '✅ Saved!'; setTimeout(() => btn.textContent = '💾 Save All', 2000); }
 }
 
 // ── VIEWER SCREEN ─────────────────────────────────────────────
