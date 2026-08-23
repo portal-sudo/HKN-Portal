@@ -1168,7 +1168,7 @@ function seedStudentsIfEmpty() {
 // in the top nav bar and checkable via console (APP_VERSION), so
 // it's always possible to tell which version a saved file or a
 // deployed site is actually running. Format: v<date>.<n>
-const APP_VERSION = 'v2026-08-21.5';
+const APP_VERSION = 'v2026-08-23.2';
 
 // ── STATE ────────────────────────────────────────────────────
 // Device detection — set once at boot, used for mobile-specific behavior
@@ -1507,7 +1507,6 @@ function buildSidebar() {
     { id:'dashboard', icon:'📊', label:'Dashboard' },
     { id:'directory', icon:'👥', label:'Student directory' },
     { section: 'Students' },
-    ...(isAdmin ? [{ id:'add-student', icon:'➕', label:'Add student' }] : []),
     ...(!isMobile ? [{ id:'email', icon:'✉️', label:'Send email' }, { id:'templates', icon:'📋', label:'Email templates' }] : []),
     { section: 'School' },
     ...(currentUser.role === 'teacher' ? [{ id:'attendance', icon:'📝', label:'Mark attendance' }] : []),
@@ -1518,7 +1517,7 @@ function buildSidebar() {
     ...(isAdmin ? [{ id:'fees', icon:'💰', label:'Fees tracker' }] : []),
     ...(isAdmin ? [{ id:'inventory', icon:'📚', label:'Book inventory' }] : []),
     ...(isAdmin ? [
-      { id:'attributes', icon:'⚙️', label:'School attributes' },
+      { id:'attributes', icon:'⚙️', label:'Settings' },
       { section: 'System' },
       { id:'backup',  icon:'💾', label:'Backup & restore' },
     ] : []),
@@ -4152,7 +4151,7 @@ function _attrTabBar(active) {
 
 function _attrPageHeader() {
   return `<div class="page-header">
-    <div class="page-title">School attributes</div>
+    <div class="page-title">Settings</div>
     <div class="page-subtitle">Manage portal settings, teachers, class attributes and edit scoring guide</div>
   </div>`;
 }
