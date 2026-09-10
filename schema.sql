@@ -31,6 +31,21 @@
 -- alone does NOT backfill columns onto a table that already exists,
 -- which silently broke the production promotion. See Section 1B and
 -- README "Known Fixes" for the full story.
+-- Updated: August 2026 — enabled the domain-based Viewer role. Any
+-- @hindikineev.org email with no teachers/admins row now gets
+-- automatic read-only access via a broadened is_portal_user() and a
+-- new synthesized-role branch in get_teacher_by_email(). The one write
+-- policy that shared is_portal_user() (students_teacher_update) was
+-- changed to a narrower, teachers-table-specific check so this stays
+-- read-only at the database layer, not just in the UI.
+-- Updated: September 2026 — added settings.interest_confirmation_message
+-- and included it in get_public_data(), so admin can customize the
+-- message parents see after submitting an interest form (previously
+-- hardcoded). See README "Known Fixes" for the app-side bug this
+-- surfaced: the confirmation screen initially read from the wrong
+-- client-side source (DB.getSettings(), only populated for logged-in
+-- staff) instead of the public RPC response, so the custom message
+-- never showed for anonymous parents until both were fixed together.
 --
 -- Run this top-to-bottom on ANY Supabase project — fresh or existing —
 -- to bring it fully up to date with everything below: tables,
@@ -135,6 +150,7 @@ create table if not exists settings (
   intake_enabled           boolean default false,
   staff_enabled            boolean default false,
   active_student_message   text,
+  interest_confirmation_message text,
   inactivity_minutes       integer default 45
 );
 
@@ -213,6 +229,7 @@ create table if not exists book_teacher_copies (
 alter table admins   add column if not exists last_login timestamptz;
 alter table students add column if not exists photo_path text;
 alter table teachers add column if not exists last_login timestamptz;
+alter table settings add column if not exists interest_confirmation_message text;
 
 
 -- =====================================================================
@@ -236,6 +253,13 @@ as $function$
   );
 $function$;
 
+-- Broadened August 2026 — any @hindikineev.org email now passes this
+-- check, not just people with a teachers-table row. This is what
+-- powers the domain-based Viewer role: anyone with a school email
+-- automatically gets read access, no per-person setup needed. This
+-- is intentionally broad for READS only — see students_teacher_update
+-- below for why the one write policy that used to share this function
+-- was changed to a narrower, teachers-table-specific check instead.
 create or replace function is_portal_user()
 returns boolean
 language sql
@@ -244,7 +268,8 @@ as $function$
   select exists (
     select 1 from teachers
     where lower(email) = lower(auth.jwt() ->> 'email')
-  );
+  )
+  or lower(auth.jwt() ->> 'email') like '%@hindikineev.org';
 $function$;
 
 -- Narrow SECURITY DEFINER function — only ever touches last_login for
@@ -290,6 +315,10 @@ begin
 end;
 $function$;
 
+-- Updated August 2026 — added a third branch that synthesizes a
+-- 'viewer' role for any @hindikineev.org email not already an admin
+-- or teacher. Powers the domain-based Viewer role — see is_portal_user()
+-- above for the matching read-access change this depends on.
 create or replace function get_teacher_by_email(lookup_email text)
 returns table(first_name text, last_name text, role text)
 language sql
@@ -303,6 +332,15 @@ as $function$
     select t.first_name, t.last_name, t.role, 2 as priority
     from teachers t
     where lower(t.email) = lower(lookup_email)
+    union all
+    select
+      initcap(split_part(lookup_email, '@', 1)) as first_name,
+      '' as last_name,
+      'viewer'::text as role,
+      3 as priority
+    where lower(lookup_email) like '%@hindikineev.org'
+      and not exists (select 1 from admins where lower(email) = lower(lookup_email))
+      and not exists (select 1 from teachers where lower(email) = lower(lookup_email))
   ) combined
   order by priority
   limit 1;
@@ -324,6 +362,7 @@ as $function$
   select json_build_object(
     'intakeEnabled',        s.intake_enabled,
     'activeStudentMessage', s.active_student_message,
+    'interestConfirmationMessage', s.interest_confirmation_message,
     'sessions', (
       select json_agg(
         json_build_object(
@@ -566,11 +605,18 @@ create policy "students_select_teacher"
   on students for select
   using (is_portal_user());
 
+-- Deliberately does NOT use is_portal_user() (unlike other policies on
+-- this page) — that function was broadened in August 2026 to grant any
+-- @hindikineev.org email read access for the Viewer role, and this is
+-- the one WRITE policy that used to share it. Changed to check
+-- teachers-table membership directly, so a domain-based Viewer (who
+-- has no row in teachers) can read but never write student records,
+-- regardless of how broad read access becomes.
 drop policy if exists "students_teacher_update" on students;
 create policy "students_teacher_update"
   on students for update
-  using (is_portal_user())
-  with check (is_portal_user());
+  using (exists (select 1 from teachers where lower(email) = lower(auth.jwt() ->> 'email')))
+  with check (exists (select 1 from teachers where lower(email) = lower(auth.jwt() ->> 'email')));
 
 drop policy if exists "students_admin_write" on students;
 create policy "students_admin_write"
