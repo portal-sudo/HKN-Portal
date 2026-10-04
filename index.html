@@ -835,6 +835,60 @@ const SessionEngine = {
   buildSessionName(term, year) { return `${term}-${year}`; },
 };
 
+// "Class identity" within a session is (teacher, classTime) — classLevel is
+// fully determined by that pair (verified against real data), not an
+// independent axis, and matches the key format already used by
+// session.classNotes (e.g. "Rina|Sat 10:00 AM"). Reused by School Health.
+function _healthClassKey(sd) {
+  return `${sd.teacher || ''}|${sd.classTime || ''}`;
+}
+
+// Active students with a sessionData entry for the given session, optionally
+// scoped by grouping/groupKey (same semantics as DB.healthGroups/healthTrend:
+// grouping is 'school' | 'teacher' | 'class'). Returns [{ student, sd }] —
+// callers that only need sd (like healthTrend) can map it down further.
+// Shared by School Health and the Audit Logs checks, so the "who counts"
+// definition stays in exactly one place.
+function _matchingStudents(sessionName, grouping, groupKey) {
+  return _cache.students
+    .filter(s => s.status === 'Active')
+    .map(s => ({ student: s, sd: (s.sessionData || []).find(d => d.session === sessionName) }))
+    .filter(({ sd }) => !!sd)
+    .filter(({ sd }) => {
+      if (grouping === 'teacher') return (sd.teacher || '') === groupKey;
+      if (grouping === 'class')   return _healthClassKey(sd) === groupKey;
+      return true; // 'school'
+    });
+}
+
+// Matches the date part of a dated notes line — same line shape as
+// _NOTES_DATE_LINE below, but with the date captured so callers can parse
+// it, and with an isHomework flag since homework broadcasts and regular
+// per-student notes share this exact same field and format, distinguished
+// only by the "Homework " prefix (see saveHomeworkNoteToClass).
+const _NOTES_DATE_LINE_CAP = /^(Homework )?([A-Z][a-z]{2} \d{1,2}, \d{4}):/;
+
+// Returns the most recent dated line's JS Date in a notes field, or null if
+// none found. opts.homeworkOnly / opts.excludeHomework pick which kind of
+// dated line to consider — notes and homework broadcasts are interleaved in
+// the same field in whatever order they were added, not separated or
+// pre-sorted, so this has to scan every line rather than just take the last.
+function _lastNotesDate(notesText, opts = {}) {
+  if (!notesText) return null;
+  let latest = null;
+  notesText.split('\n').forEach(line => {
+    const m = line.match(_NOTES_DATE_LINE_CAP);
+    if (!m) return;
+    const isHomework = !!m[1];
+    if (opts.homeworkOnly && !isHomework) return;
+    if (opts.excludeHomework && isHomework) return;
+    const d = new Date(m[2]);
+    if (isNaN(d)) return;
+    if (!latest || d > latest) latest = d;
+  });
+  return latest;
+}
+
 // ── DATA ACCESS LAYER ────────────────────────────────────────
 const DB = {
 
@@ -1112,6 +1166,257 @@ const DB = {
     return counts;
   },
 
+  // ── SCHOOL HEALTH — attendance/homework trend data ──────────
+  // Scoped to Active students with a sessionData entry for the given
+  // session. grouping is 'school' | 'teacher' | 'class'; groupKey is
+  // ignored for 'school', a teacher name for 'teacher', and a
+  // "teacher|classTime" key (see _healthClassKey) for 'class'.
+
+  // Returns the pickable groups for a grouping, as [{key, label}],
+  // sorted by label. Used to populate the School Health class/teacher
+  // picker — not needed for 'school', which has no sub-groups.
+  healthGroups(sessionName, grouping) {
+    const seen = new Map();
+    _cache.students.forEach(s => {
+      if (s.status !== 'Active') return;
+      const sd = (s.sessionData || []).find(d => d.session === sessionName);
+      if (!sd) return;
+      if (grouping === 'teacher') {
+        const key = sd.teacher || '';
+        if (key && !seen.has(key)) seen.set(key, key);
+      } else if (grouping === 'class') {
+        if (!sd.teacher || !sd.classTime) return; // not a real class assignment
+        const key = _healthClassKey(sd);
+        if (!seen.has(key)) seen.set(key, `${sd.teacher} · ${sd.classTime} · ${sd.classLevel || '—'}`);
+      }
+    });
+    return Array.from(seen.entries())
+      .map(([key, label]) => ({ key, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  },
+
+  // Returns { dates, counts, enrolledTotal } for the given session/metric/
+  // grouping. dates is session.classDates as-is, including future dates
+  // (trusted chronological order, same assumption already made everywhere
+  // else classDates is used) — the chart renderer, not this function,
+  // decides where to stop drawing the line (see _renderHealthChartSvg).
+  // counts is { present/absent/vacation -> [n per date] } for 'attendance',
+  // or { yes/no -> [n per date] } for 'homework' — 'unmarked'/'unknown'
+  // values are intentionally not tallied (nothing to plot for those).
+  healthTrend(sessionName, metric, grouping, groupKey) {
+    const sess = this.getSession(sessionName);
+    const dates = (sess?.classDates || []).slice();
+
+    const matchingSd = _matchingStudents(sessionName, grouping, groupKey).map(({ sd }) => sd);
+
+    const valueKeys = metric === 'attendance' ? ['present', 'absent', 'vacation'] : ['yes', 'no'];
+    const counts = {};
+    valueKeys.forEach(k => counts[k] = dates.map(() => 0));
+
+    matchingSd.forEach(sd => {
+      const field = metric === 'attendance' ? (sd.attendance || {}) : (sd.homeworkDone || {});
+      dates.forEach((d, i) => {
+        const v = field[d];
+        if (v && counts[v]) counts[v][i]++;
+      });
+    });
+
+    return { dates, counts, enrolledTotal: matchingSd.length };
+  },
+
+  // Audit check: classes with a past class date where NOT A SINGLE enrolled
+  // student has any attendance mark at all (a fully-skipped roll call, not
+  // just one student's attendance missing — that's not flagged here).
+  // grouping/groupKey optionally scope which classes are checked, same
+  // 'teacher' | 'class' | null convention as healthTrend/healthGroups.
+  // Returns [{ classKey, classLabel, date }], one entry per unmarked
+  // (class, date) pair.
+  auditUnmarkedClasses(sessionName, grouping, groupKey) {
+    const sess = this.getSession(sessionName);
+    const today = _todayLocal();
+    const pastDates = (sess?.classDates || []).filter(d => d <= today);
+    if (!pastDates.length) return [];
+
+    let classGroups = this.healthGroups(sessionName, 'class');
+    if (grouping === 'class') {
+      classGroups = classGroups.filter(g => g.key === groupKey);
+    } else if (grouping === 'teacher') {
+      classGroups = classGroups.filter(g => g.key.split('|')[0] === groupKey);
+    }
+
+    const flags = [];
+    classGroups.forEach(({ key, label }) => {
+      const sds = _matchingStudents(sessionName, 'class', key).map(({ sd }) => sd);
+      if (!sds.length) return;
+      pastDates.forEach(date => {
+        const anyMarked = sds.some(sd => !!(sd.attendance || {})[date]);
+        if (!anyMarked) flags.push({ classKey: key, classLabel: label, date });
+      });
+    });
+    return flags;
+  },
+
+  // Audit check: students with >= threshold total 'absent' marks in this
+  // session (not necessarily consecutive — see auditAbsencesConsecutive for
+  // that). grouping/groupKey optionally scope to one class/teacher, same
+  // convention as the other audit checks. threshold defaults to 3 (hardcoded
+  // for now; may become an admin-configurable setting later).
+  // Returns [{ studentId, studentName, absentCount }], sorted by absentCount
+  // descending.
+  auditAbsencesTotal(sessionName, grouping, groupKey, threshold = 3) {
+    return _matchingStudents(sessionName, grouping, groupKey)
+      .map(({ student, sd }) => {
+        const absentCount = Object.values(sd.attendance || {}).filter(v => v === 'absent').length;
+        return { id: student.id, studentId: student.studentId, studentName: `${student.firstName} ${student.lastName}`, absentCount };
+      })
+      .filter(r => r.absentCount >= threshold)
+      .sort((a, b) => b.absentCount - a.absentCount);
+  },
+
+  // Audit check: students with a run of >= threshold consecutive 'absent'
+  // marks in this session (back-to-back class dates, not just a total
+  // count — see auditAbsencesTotal for that). Only class dates that have
+  // already happened (<= today) are considered, in session.classDates
+  // order, so a future unmarked date can't fake or break a streak.
+  // 'present' and 'vacation' (displayed "Excused") both break the streak —
+  // only consecutive 'absent' marks count. threshold defaults to 2.
+  // Returns [{ studentId, studentName, consecutiveCount }], sorted by
+  // consecutiveCount descending.
+  auditAbsencesConsecutive(sessionName, grouping, groupKey, threshold = 2) {
+    const sess = this.getSession(sessionName);
+    const today = _todayLocal();
+    const pastDates = (sess?.classDates || []).filter(d => d <= today);
+
+    return _matchingStudents(sessionName, grouping, groupKey)
+      .map(({ student, sd }) => {
+        const att = sd.attendance || {};
+        let longest = 0, current = 0;
+        pastDates.forEach(date => {
+          if (att[date] === 'absent') {
+            current++;
+            longest = Math.max(longest, current);
+          } else {
+            current = 0;
+          }
+        });
+        return { id: student.id, studentId: student.studentId, studentName: `${student.firstName} ${student.lastName}`, consecutiveCount: longest };
+      })
+      .filter(r => r.consecutiveCount >= threshold)
+      .sort((a, b) => b.consecutiveCount - a.consecutiveCount);
+  },
+
+  // Audit check: classes where turnout (present / enrolled) on the most
+  // recent past class date fell below threshold (default 50%). classDates
+  // are shared across all classes in a session, so "most recent past date"
+  // is the same single date for every class — this is a point-in-time
+  // signal (last class only), not a rolling average. A class with no
+  // enrolled students, or no past class date yet, is skipped (nothing
+  // meaningful to compute). grouping/groupKey optionally scope which
+  // classes are checked, same convention as the other audit checks.
+  // Returns [{ classKey, classLabel, date, presentCount, enrolledCount,
+  // turnoutFraction }], sorted by turnoutFraction ascending (worst first).
+  auditLowTurnout(sessionName, grouping, groupKey, threshold = 0.5) {
+    const sess = this.getSession(sessionName);
+    const today = _todayLocal();
+    const pastDates = (sess?.classDates || []).filter(d => d <= today);
+    if (!pastDates.length) return [];
+    const lastDate = pastDates[pastDates.length - 1];
+
+    let classGroups = this.healthGroups(sessionName, 'class');
+    if (grouping === 'class') {
+      classGroups = classGroups.filter(g => g.key === groupKey);
+    } else if (grouping === 'teacher') {
+      classGroups = classGroups.filter(g => g.key.split('|')[0] === groupKey);
+    }
+
+    const flags = [];
+    classGroups.forEach(({ key, label }) => {
+      const sds = _matchingStudents(sessionName, 'class', key).map(({ sd }) => sd);
+      const enrolledCount = sds.length;
+      if (!enrolledCount) return;
+      const presentCount = sds.filter(sd => (sd.attendance || {})[lastDate] === 'present').length;
+      const turnoutFraction = presentCount / enrolledCount;
+      if (turnoutFraction < threshold) {
+        flags.push({ classKey: key, classLabel: label, date: lastDate, presentCount, enrolledCount, turnoutFraction });
+      }
+    });
+    return flags.sort((a, b) => a.turnoutFraction - b.turnoutFraction);
+  },
+
+  // Audit check: classes whose most recent homework broadcast (see
+  // saveHomeworkNoteToClass) is more than weeksThreshold weeks old, or that
+  // have never had one. Homework broadcasts are written into every
+  // currently-enrolled student's notes field at broadcast time (not stored
+  // per-class), so "the class's last homework broadcast" is taken as the
+  // MOST RECENT homework-line date found across all of the class's
+  // currently-enrolled students — a student who joined after a broadcast
+  // simply won't have that older line, which doesn't affect the max.
+  // grouping/groupKey optionally scope which classes are checked, same
+  // convention as the other audit checks. weeksThreshold defaults to 2.
+  // Returns [{ classKey, classLabel, lastHomeworkDate, weeksSince }],
+  // lastHomeworkDate is an ISO date string or null if never broadcast,
+  // sorted with never-broadcast classes first, then oldest first.
+  auditMissingHomework(sessionName, grouping, groupKey, weeksThreshold = 2) {
+    const today = new Date(_todayLocal());
+    let classGroups = this.healthGroups(sessionName, 'class');
+    if (grouping === 'class') {
+      classGroups = classGroups.filter(g => g.key === groupKey);
+    } else if (grouping === 'teacher') {
+      classGroups = classGroups.filter(g => g.key.split('|')[0] === groupKey);
+    }
+
+    const flags = [];
+    classGroups.forEach(({ key, label }) => {
+      const sds = _matchingStudents(sessionName, 'class', key).map(({ sd }) => sd);
+      if (!sds.length) return;
+      let lastDate = null;
+      sds.forEach(sd => {
+        const d = _lastNotesDate(sd.notes, { homeworkOnly: true });
+        if (d && (!lastDate || d > lastDate)) lastDate = d;
+      });
+      const weeksSince = lastDate ? (today - lastDate) / (7 * 24 * 60 * 60 * 1000) : Infinity;
+      if (weeksSince > weeksThreshold) {
+        flags.push({
+          classKey: key, classLabel: label,
+          lastHomeworkDate: lastDate ? lastDate.toISOString().slice(0, 10) : null,
+          weeksSince: weeksSince === Infinity ? null : Math.floor(weeksSince),
+        });
+      }
+    });
+    return flags.sort((a, b) => {
+      if (a.lastHomeworkDate === null && b.lastHomeworkDate === null) return 0;
+      if (a.lastHomeworkDate === null) return -1;
+      if (b.lastHomeworkDate === null) return 1;
+      return a.lastHomeworkDate.localeCompare(b.lastHomeworkDate);
+    });
+  },
+
+  // Audit check: students whose most recent PERSONAL note (excluding
+  // homework broadcast lines — see _lastNotesDate's excludeHomework option)
+  // is more than weeksThreshold weeks old. A student with no personal note
+  // EVER is deliberately NOT flagged — nothing to go stale, not an issue
+  // this check surfaces. grouping/groupKey optionally scope to one
+  // class/teacher, same convention as the other audit checks.
+  // weeksThreshold defaults to 3. Returns [{ studentId, studentName,
+  // lastNoteDate, weeksSince }], sorted oldest first.
+  auditStaleNotes(sessionName, grouping, groupKey, weeksThreshold = 3) {
+    const today = new Date(_todayLocal());
+    return _matchingStudents(sessionName, grouping, groupKey)
+      .map(({ student, sd }) => {
+        const lastDate = _lastNotesDate(sd.notes, { excludeHomework: true });
+        if (!lastDate) return null; // never noted — not flaggable
+        const weeksSince = (today - lastDate) / (7 * 24 * 60 * 60 * 1000);
+        return {
+          id: student.id, studentId: student.studentId, studentName: `${student.firstName} ${student.lastName}`,
+          lastNoteDate: lastDate.toISOString().slice(0, 10),
+          weeksSince: Math.floor(weeksSince), _raw: weeksSince,
+        };
+      })
+      .filter(r => r && r._raw > weeksThreshold)
+      .sort((a, b) => b._raw - a._raw)
+      .map(({ _raw, ...rest }) => rest);
+  },
+
   // EXPORT / IMPORT
   exportJSON() {
     return JSON.stringify({
@@ -1298,7 +1603,7 @@ function seedStudentsIfEmpty() {
 // in the top nav bar and checkable via console (APP_VERSION), so
 // it's always possible to tell which version a saved file or a
 // deployed site is actually running. Format: v<date>.<n>
-const APP_VERSION = 'v2026-09-26.8';
+const APP_VERSION = 'v2026-10-04.10';
 
 // ── STATE ────────────────────────────────────────────────────
 // Device detection — set once at boot, used for mobile-specific behavior
@@ -1642,6 +1947,8 @@ function buildSidebar() {
     { id:'sessions', icon:'📅', label:'Sessions' },
     { id:'classes',  icon:'🏫', label:'Classes' },
     { id:'scoring-guide', icon:'📖', label:'Scoring guide' },
+    { id:'school-health', icon:'📈', label:'School Health' },
+    { id:'audit-logs', icon:'🔍', label:'Audit Logs' },
     ...(isAdmin ? [
       { id:'attributes', icon:'⚙️', label:'Settings', children: ATTR_TABS },
     ] : []),
@@ -1698,6 +2005,8 @@ function navigateTo(page) {
     sessions:    renderSessions,
     classes:     renderClasses,
     'scoring-guide': renderScoringGuide,
+    'school-health': renderSchoolHealth,
+    'audit-logs':    renderAuditLogs,
     attributes:  renderAttributesChooser,
     email:       renderEmail,
     templates:   renderTemplates,
@@ -6053,6 +6362,7 @@ const SupabaseSync = {
         classDates:     row.class_dates   || [],
         classNotes:     row.class_notes   || {},
         refunds:        row.refunds       || [],
+        healthNote:     row.health_note   || '',
       }));
 
       // ── Reassemble teachers ──
@@ -6382,6 +6692,7 @@ const SupabaseSync = {
       class_dates:     s.classDates      || [],
       class_notes:     s.classNotes      || {},
       refunds:         s.refunds         || [],
+      health_note:     s.healthNote      || '',
     };
   },
 
@@ -7415,6 +7726,404 @@ function onAttSessionYearChange() {
     sessSel.value = match ? match.name : (termsInYear[0]?.name || '');
   }
   loadAttendanceClass();
+}
+
+// ── SCHOOL HEALTH — attendance/homework trend charts ──────────
+// Read-only for both teachers and admins. Admin may additionally edit
+// the one freeform note stored on the session (sessions.health_note).
+let _healthState = { session: '', metric: 'attendance', grouping: 'school', groupKey: '', series: 'present' };
+
+function renderSchoolHealth() {
+  const sessions = sortSessionsChronological(DB.getSessions());
+  const activeSess = SessionEngine.getActiveSession() || sessions[sessions.length - 1];
+  _healthState.session = activeSess?.name || '';
+  _healthState.metric = 'attendance';
+  _healthState.grouping = 'school';
+  _healthState.groupKey = '';
+  _healthState.series = 'present';
+
+  // Landing default: a teacher lands pre-scoped to their own classes (same
+  // as Audit Logs), not "Whole school" — they can still change it freely,
+  // this only decides what they see first.
+  if (currentUser.role === 'teacher' && currentUser.name) {
+    _healthState.grouping = 'teacher';
+    _healthState.groupKey = currentUser.name;
+  }
+
+  const groupKeyOptions = _healthState.grouping === 'school' ? [] : DB.healthGroups(_healthState.session, _healthState.grouping);
+
+  document.getElementById('content-area').innerHTML = `
+    <div class="page-header">
+      <div class="page-title">School Health</div>
+      <div class="page-subtitle">Attendance and homework trends — read-only</div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+        <div class="form-group" style="min-width:140px;">
+          <label class="form-label">Session</label>
+          <select class="form-select" id="health-session" onchange="onHealthSessionChange()">
+            ${sessions.map(s => `<option value="${escAttr(s.name)}" ${s.name === _healthState.session ? 'selected' : ''}>${escHtml(s.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group" style="min-width:130px;">
+          <label class="form-label">Metric</label>
+          <select class="form-select" id="health-metric" onchange="onHealthMetricChange()">
+            <option value="attendance" selected>Attendance</option>
+            <option value="homework">Homework</option>
+          </select>
+        </div>
+        <div class="form-group" style="min-width:130px;">
+          <label class="form-label">Group by</label>
+          <select class="form-select" id="health-grouping" onchange="onHealthGroupingChange()">
+            <option value="school" ${_healthState.grouping === 'school' ? 'selected' : ''}>Whole school</option>
+            <option value="teacher" ${_healthState.grouping === 'teacher' ? 'selected' : ''}>Teacher</option>
+            <option value="class" ${_healthState.grouping === 'class' ? 'selected' : ''}>Class</option>
+          </select>
+        </div>
+        <div class="form-group" id="health-groupkey-wrap" style="min-width:200px; display:${_healthState.grouping === 'school' ? 'none' : 'block'};">
+          <label class="form-label" id="health-groupkey-label">${_healthState.grouping === 'class' ? 'Class' : 'Teacher'}</label>
+          <select class="form-select" id="health-groupkey" onchange="onHealthGroupKeyChange()">
+            ${groupKeyOptions.map(g => `<option value="${escAttr(g.key)}" ${g.key === _healthState.groupKey ? 'selected' : ''}>${escHtml(g.label)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group" style="min-width:110px;">
+          <label class="form-label">Show</label>
+          <select class="form-select" id="health-series" onchange="onHealthSeriesChange()"></select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <div id="health-chart-wrap"></div>
+    </div>
+
+    <div class="card" id="health-note-card">
+      <div class="card-title">📌 Note for this session</div>
+      <div id="health-note-body"></div>
+    </div>
+  `;
+
+  _populateHealthSeriesOptions();
+  renderHealthNoteSection();
+  updateHealthChart();
+}
+
+function onHealthSessionChange() {
+  _healthState.session = document.getElementById('health-session').value;
+  _healthState.grouping = 'school';
+  _healthState.groupKey = '';
+  document.getElementById('health-grouping').value = 'school';
+  document.getElementById('health-groupkey-wrap').style.display = 'none';
+  renderHealthNoteSection();
+  updateHealthChart();
+}
+
+function onHealthMetricChange() {
+  _healthState.metric = document.getElementById('health-metric').value;
+  _populateHealthSeriesOptions();
+  updateHealthChart();
+}
+
+function onHealthGroupingChange() {
+  const grouping = document.getElementById('health-grouping').value;
+  _healthState.grouping = grouping;
+  const wrap  = document.getElementById('health-groupkey-wrap');
+  const label = document.getElementById('health-groupkey-label');
+  const sel   = document.getElementById('health-groupkey');
+
+  if (grouping === 'school') {
+    wrap.style.display = 'none';
+    _healthState.groupKey = '';
+  } else {
+    wrap.style.display = 'block';
+    label.textContent = grouping === 'teacher' ? 'Teacher' : 'Class';
+    const groups = DB.healthGroups(_healthState.session, grouping);
+    sel.innerHTML = groups.map(g => `<option value="${escAttr(g.key)}">${escHtml(g.label)}</option>`).join('');
+    _healthState.groupKey = groups[0]?.key || '';
+  }
+  updateHealthChart();
+}
+
+function onHealthGroupKeyChange() {
+  _healthState.groupKey = document.getElementById('health-groupkey').value;
+  updateHealthChart();
+}
+
+function onHealthSeriesChange() {
+  _healthState.series = document.getElementById('health-series').value;
+  updateHealthChart();
+}
+
+function _populateHealthSeriesOptions() {
+  const sel = document.getElementById('health-series');
+  const options = _healthState.metric === 'attendance'
+    ? [{ v:'present', l:'Present (P)' }, { v:'absent', l:'Absent (A)' }, { v:'vacation', l:'Excused (E)' }]
+    : [{ v:'yes', l:'Homework done' }, { v:'no', l:'Homework not done' }];
+  sel.innerHTML = options.map(o => `<option value="${o.v}">${o.l}</option>`).join('');
+  _healthState.series = options[0].v;
+}
+
+function updateHealthChart() {
+  const { session, metric, grouping, groupKey, series } = _healthState;
+  const trend = DB.healthTrend(session, metric, grouping, grouping === 'school' ? '' : groupKey);
+  document.getElementById('health-chart-wrap').innerHTML = _renderHealthChartSvg(trend, series, metric);
+}
+
+// Fixed y-axis (0..enrolledTotal), not auto-scaled to the observed max —
+// so the same count looks the same regardless of which date/group you're
+// viewing, and "everyone present" always reaches the top of the chart.
+function _renderHealthChartSvg(trend, seriesKey, metric) {
+  const { dates, counts, enrolledTotal } = trend;
+  if (!dates.length) {
+    return `<div style="color:var(--ink-light); font-size:13px; padding:20px 0;">No class dates to show yet — either none are set for this session, or none have happened as of today.</div>`;
+  }
+  const values = counts[seriesKey] || dates.map(() => 0);
+  const maxY = Math.max(1, enrolledTotal);
+
+  const colorMap = { present:'var(--success)', absent:'var(--danger)', vacation:'var(--warning)', yes:'var(--success)', no:'var(--danger)' };
+  const color = colorMap[seriesKey] || 'var(--olive)';
+
+  // Font size 18px for all chart labels (axis numbers, date labels, value
+  // labels), per explicit request — padding/chart height sized to match.
+  const chartW = 900, chartH = 280, padL = 50, padB = 50, padT = 30;
+  const plotW = chartW - padL - 14, plotH = chartH - padB - padT;
+  const stepX = dates.length > 1 ? plotW / (dates.length - 1) : 0;
+
+  const xAt = i => padL + i * stepX;
+  const yAt = v => padT + (plotH - (v / maxY) * plotH);
+
+  // Show every class date on the x-axis, but only draw the line/dots
+  // through today — a future date gets a label with nothing plotted at it,
+  // rather than a misleading zero point or an extended flat line.
+  const today = _todayLocal();
+  const lastDrawn = dates.reduce((last, d, i) => d <= today ? i : last, -1);
+
+  const pointsAttr = values.slice(0, lastDrawn + 1).map((v, i) => `${xAt(i)},${yAt(v)}`).join(' ');
+  const shortDate = d => { const m = d.match(/^\d{4}-(\d{2})-(\d{2})$/); return m ? `${parseInt(m[1],10)}/${parseInt(m[2],10)}` : d; };
+  const showLabel = i => dates.length <= 12 || i % 2 === 0 || i === dates.length - 1;
+
+  const dotsAndLabels = values.map((v, i) => `
+    ${i <= lastDrawn ? `
+    <circle cx="${xAt(i)}" cy="${yAt(v)}" r="5" fill="${color}">
+      <title>${escHtml(dates[i])}: ${v}</title>
+    </circle>
+    <text x="${xAt(i)}" y="${yAt(v) - 10}" font-size="18" text-anchor="middle" fill="var(--ink-mid)">${v}</text>
+    ` : ''}
+    ${showLabel(i) ? `<text x="${xAt(i)}" y="${chartH - padB + 24}" font-size="18" text-anchor="middle" fill="var(--ink-light)">${shortDate(dates[i])}</text>` : ''}
+  `).join('');
+
+  return `
+    <div style="font-size:12px; color:var(--ink-light); margin-bottom:10px;">
+      Enrolled: ${enrolledTotal} &nbsp;·&nbsp; y-axis fixed at enrolled total, not observed max &nbsp;·&nbsp; line stops at today
+    </div>
+    <svg viewBox="0 0 ${chartW} ${chartH}" style="width:100%; height:auto; max-height:320px;">
+      <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${chartH-padB}" stroke="var(--olive-mid)" stroke-width="1"/>
+      <line x1="${padL}" y1="${chartH-padB}" x2="${chartW-10}" y2="${chartH-padB}" stroke="var(--olive-mid)" stroke-width="1"/>
+      <text x="${padL-8}" y="${padT+6}" font-size="18" text-anchor="end" fill="var(--ink-light)">${maxY}</text>
+      <text x="${padL-8}" y="${chartH-padB+6}" font-size="18" text-anchor="end" fill="var(--ink-light)">0</text>
+      ${lastDrawn >= 0 ? `<polyline points="${pointsAttr}" fill="none" stroke="${color}" stroke-width="2"/>` : ''}
+      ${dotsAndLabels}
+    </svg>
+    <div style="font-size:11px; color:var(--ink-light); margin-top:4px;">Class date →</div>
+  `;
+}
+
+function renderHealthNoteSection() {
+  const sess = DB.getSession(_healthState.session);
+  const isAdmin = currentUser.role === 'admin';
+  const note = sess?.healthNote || '';
+  const body = document.getElementById('health-note-body');
+  if (!body) return;
+  body.innerHTML = isAdmin ? `
+    <textarea class="form-textarea" id="health-note-input" rows="3" placeholder="Optional note for this session, shown to teachers too…">${escHtml(note)}</textarea>
+    <div style="margin-top:8px;">
+      <button class="btn btn-primary btn-sm" onclick="saveHealthNote()">💾 Save note</button>
+      <span id="health-note-status" style="font-size:12px; color:var(--ink-light); margin-left:8px;"></span>
+    </div>
+  ` : (note
+      ? `<div style="font-size:13px; color:var(--ink); white-space:pre-wrap;">${escHtml(note)}</div>`
+      : `<div style="font-size:13px; color:var(--ink-light);">No note for this session.</div>`);
+}
+
+function saveHealthNote() {
+  const sess = DB.getSession(_healthState.session);
+  if (!sess) return;
+  const note = document.getElementById('health-note-input').value;
+  DB.saveSession({ ...sess, healthNote: note });
+  const status = document.getElementById('health-note-status');
+  if (status) {
+    status.textContent = '✓ Saved';
+    setTimeout(() => { if (status) status.textContent = ''; }, 2500);
+  }
+  showToast('Note saved', 'success');
+}
+
+// AUDIT LOGS — six read-only checks (4 attendance + 2 notes/homework) over
+// the active audit* functions on DB. Full visibility for both teachers and
+// admins — a teacher's filter just defaults to their own name on landing,
+// it doesn't restrict what they can view (they can change it to see any
+// class/teacher). grouping is '' (whole school) | 'teacher' | 'class',
+// mirroring the audit-function convention, but deliberately NOT reusing
+// _healthState — these are six independent checks, not a single
+// metric/series pair.
+let _auditState = { session: '', grouping: '', groupKey: '' };
+
+function renderAuditLogs() {
+  const sessions = sortSessionsChronological(DB.getSessions());
+  const activeSess = SessionEngine.getActiveSession() || sessions[sessions.length - 1];
+  _auditState.session = activeSess?.name || '';
+  _auditState.grouping = '';
+  _auditState.groupKey = '';
+  if (currentUser.role === 'teacher' && currentUser.name) {
+    _auditState.grouping = 'teacher';
+    _auditState.groupKey = currentUser.name;
+  }
+
+  document.getElementById('content-area').innerHTML = `
+    <div class="page-header">
+      <div class="page-title">Audit Logs</div>
+      <div class="page-subtitle">Attendance and notes checks — read-only</div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+        <div class="form-group" style="min-width:140px;">
+          <label class="form-label">Session</label>
+          <select class="form-select" id="audit-session" onchange="onAuditSessionChange()">
+            ${sessions.map(s => `<option value="${escAttr(s.name)}" ${s.name === _auditState.session ? 'selected' : ''}>${escHtml(s.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group" style="min-width:240px;">
+          <label class="form-label">Teacher / Class filter</label>
+          <select class="form-select" id="audit-filter" onchange="onAuditFilterChange()"></select>
+        </div>
+      </div>
+    </div>
+
+    <div id="audit-panels"></div>
+  `;
+
+  _populateAuditFilterOptions();
+  renderAuditPanels();
+}
+
+function _populateAuditFilterOptions() {
+  const sel = document.getElementById('audit-filter');
+  const teacherGroups = DB.healthGroups(_auditState.session, 'teacher');
+  const classGroups   = DB.healthGroups(_auditState.session, 'class');
+  sel.innerHTML = `
+    <option value="">— All (whole school) —</option>
+    <optgroup label="By teacher">
+      ${teacherGroups.map(g => `<option value="teacher|${escAttr(g.key)}" ${_auditState.grouping === 'teacher' && _auditState.groupKey === g.key ? 'selected' : ''}>${escHtml(g.label)}</option>`).join('')}
+    </optgroup>
+    <optgroup label="By class">
+      ${classGroups.map(g => `<option value="class|${escAttr(g.key)}" ${_auditState.grouping === 'class' && _auditState.groupKey === g.key ? 'selected' : ''}>${escHtml(g.label)}</option>`).join('')}
+    </optgroup>
+  `;
+  if (!_auditState.grouping) sel.value = '';
+}
+
+function onAuditSessionChange() {
+  _auditState.session = document.getElementById('audit-session').value;
+  _auditState.grouping = '';
+  _auditState.groupKey = '';
+  _populateAuditFilterOptions();
+  renderAuditPanels();
+}
+
+function onAuditFilterChange() {
+  const val = document.getElementById('audit-filter').value;
+  if (!val) {
+    _auditState.grouping = '';
+    _auditState.groupKey = '';
+  } else {
+    // Split on the FIRST '|' only — a class groupKey is itself
+    // "teacher|classTime" and contains further '|' characters.
+    const idx = val.indexOf('|');
+    _auditState.grouping = val.slice(0, idx);
+    _auditState.groupKey = val.slice(idx + 1);
+  }
+  renderAuditPanels();
+}
+
+function renderAuditPanels() {
+  const { session, grouping, groupKey } = _auditState;
+
+  const unmarked   = DB.auditUnmarkedClasses(session, grouping, groupKey);
+  const absTotal   = DB.auditAbsencesTotal(session, grouping, groupKey);
+  const absConsec  = DB.auditAbsencesConsecutive(session, grouping, groupKey);
+  const lowTurnout = DB.auditLowTurnout(session, grouping, groupKey);
+  const missingHw  = DB.auditMissingHomework(session, grouping, groupKey);
+  const staleNotes = DB.auditStaleNotes(session, grouping, groupKey);
+
+  document.getElementById('audit-panels').innerHTML = `
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:16px;">
+      ${_auditPanelHtml('🚫 Class attendance unmarked', unmarked, f => ({
+        onclick: `goToClassFromAudit('${f.classKey.replace(/'/g, "\\'")}')`,
+        label: `${escHtml(f.classLabel)} — ${escHtml(f.date)}`,
+      }))}
+      ${_auditPanelHtml('📉 Student absent 3+ times', absTotal, f => ({
+        onclick: `openStudentModal('${f.id}')`,
+        label: `${escHtml(f.studentName)} — ${f.absentCount} absences`,
+      }))}
+      ${_auditPanelHtml('⏭️ Student absent 2+ in a row', absConsec, f => ({
+        onclick: `openStudentModal('${f.id}')`,
+        label: `${escHtml(f.studentName)} — ${f.consecutiveCount} in a row`,
+      }))}
+      ${_auditPanelHtml('📊 Low turnout (last class < 50%)', lowTurnout, f => ({
+        onclick: `goToClassFromAudit('${f.classKey.replace(/'/g, "\\'")}')`,
+        label: `${escHtml(f.classLabel)} — ${f.presentCount}/${f.enrolledCount} on ${escHtml(f.date)}`,
+      }))}
+      ${_auditPanelHtml('📚 Missing homework (2+ weeks)', missingHw, f => ({
+        onclick: `goToClassFromAudit('${f.classKey.replace(/'/g, "\\'")}')`,
+        label: `${escHtml(f.classLabel)} — ${f.lastHomeworkDate ? `last: ${escHtml(f.lastHomeworkDate)}` : 'never'}`,
+      }))}
+      ${_auditPanelHtml('📝 Stale notes (3+ weeks)', staleNotes, f => ({
+        onclick: `openStudentModal('${f.id}')`,
+        label: `${escHtml(f.studentName)} — last noted ${escHtml(f.lastNoteDate)}`,
+      }))}
+    </div>
+  `;
+}
+
+// rowFn(item) returns { onclick, label } — label is already-escaped display
+// text, onclick is a plain JS call expression (no surrounding quotes).
+function _auditPanelHtml(title, items, rowFn) {
+  return `
+    <div class="card">
+      <div class="card-title">${title}</div>
+      <div style="margin-top:8px;">
+        ${items.length ? items.map(f => {
+          const { onclick, label } = rowFn(f);
+          return `
+          <div style="padding:8px 4px; border-bottom:1px solid var(--olive-pale); cursor:pointer; font-size:13px;"
+               onmouseover="this.style.background='var(--olive-pale)'" onmouseout="this.style.background=''"
+               onclick="${escAttr(onclick)}">
+            ${label}
+          </div>`;
+        }).join('') : `<div style="font-size:13px; color:var(--ink-light); padding:8px 0;">Nothing flagged ✓</div>`}
+      </div>
+    </div>
+  `;
+}
+
+// classKey is "teacher|classTime"; the existing Classes-page preset
+// (goToClassFromOverview, used from the Dashboard) keys on
+// (teacher, classLevel) instead, so look up classLevel from any matching
+// enrolled student before reusing that existing navigation.
+function goToClassFromAudit(classKey) {
+  const idx = classKey.indexOf('|');
+  const teacher = classKey.slice(0, idx);
+  const classTime = classKey.slice(idx + 1);
+  const sessName = _auditState.session;
+  const match = DB.getStudents().find(s => {
+    if (s.status !== 'Active') return false;
+    const sd = (s.sessionData || []).find(d => d.session === sessName);
+    return sd && sd.teacher === teacher && sd.classTime === classTime;
+  });
+  const sd = match && (match.sessionData || []).find(d => d.session === sessName);
+  goToClassFromOverview(teacher, sd?.classLevel || '');
 }
 
 function renderAttendance() {
