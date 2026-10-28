@@ -851,6 +851,29 @@ function _healthClassKey(sd) {
   return `${sd.teacher || ''}|${sd.classTime || ''}`;
 }
 
+// Missed classes (unexcused 'absent' or excused 'vacation') for one student's
+// attendance map, across classDates (already limited to dates up to today and
+// sorted oldest first). Shared by the Audit "Missed classes" panel and the
+// {{absenceCount}} / {{absenceDates}} email merge fields so the two can never
+// disagree. A present or blank mark breaks a run of back-to-back missed classes.
+// Returns { dates: [{ date, excused }], longestRun }.
+function _missedClassDatesFor(attendance, classDates) {
+  const att = attendance || {};
+  const dates = [];
+  let run = 0, longestRun = 0;
+  classDates.forEach(date => {
+    const v = att[date];
+    if (v === 'absent' || v === 'vacation') {
+      dates.push({ date, excused: v === 'vacation' });
+      run++;
+      if (run > longestRun) longestRun = run;
+    } else {
+      run = 0;
+    }
+  });
+  return { dates, longestRun };
+}
+
 // Active students with a sessionData entry for the given session, optionally
 // scoped by grouping/groupKey (same semantics as DB.healthGroups/healthTrend:
 // grouping is 'school' | 'teacher' | 'class'). Returns [{ student, sd }] —
@@ -1232,123 +1255,67 @@ const DB = {
     return { dates, counts, enrolledTotal: matchingSd.length };
   },
 
-  // Audit check: classes with a past class date where NOT A SINGLE enrolled
-  // student has any attendance mark at all (a fully-skipped roll call, not
-  // just one student's attendance missing — that's not flagged here).
-  // grouping/groupKey optionally scope which classes are checked, same
-  // 'teacher' | 'class' | null convention as healthTrend/healthGroups.
-  // Returns [{ classKey, classLabel, date }], one entry per unmarked
-  // (class, date) pair.
-  auditUnmarkedClasses(sessionName, grouping, groupKey) {
+  // Audit check: Active students with no attendance mark (blank or 'unmarked')
+  // on a class date that has already passed. TODAY's class day is excluded so a
+  // teacher isn't flagged before they have had the chance to mark; it shows up
+  // from the next day. grouping/groupKey optionally scope to one class/teacher,
+  // same convention as the other audit checks. A late-joining student will show
+  // dates before they enrolled (there is no "not enrolled yet" mark to give).
+  // Returns [{ id, studentId, studentName, teacher, classKey, date }], oldest
+  // date first, then teacher, then student name.
+  auditAttendanceUnmarked(sessionName, grouping, groupKey) {
     const sess = this.getSession(sessionName);
     const today = _todayLocal();
-    const pastDates = (sess?.classDates || []).filter(d => d <= today);
+    const pastDates = (sess?.classDates || []).filter(d => d < today);
     if (!pastDates.length) return [];
-
-    let classGroups = this.healthGroups(sessionName, 'class');
-    if (grouping === 'class') {
-      classGroups = classGroups.filter(g => g.key === groupKey);
-    } else if (grouping === 'teacher') {
-      classGroups = classGroups.filter(g => g.key.split('|')[0] === groupKey);
-    }
-
-    const flags = [];
-    classGroups.forEach(({ key, label }) => {
-      const sds = _matchingStudents(sessionName, 'class', key).map(({ sd }) => sd);
-      if (!sds.length) return;
+    const rows = [];
+    _matchingStudents(sessionName, grouping, groupKey).forEach(({ student, sd }) => {
+      const att = sd.attendance || {};
       pastDates.forEach(date => {
-        const anyMarked = sds.some(sd => !!(sd.attendance || {})[date]);
-        if (!anyMarked) flags.push({ classKey: key, classLabel: label, date });
+        const v = att[date];
+        if (!v || v === 'unmarked') {
+          rows.push({
+            id: student.id, studentId: student.studentId,
+            studentName: `${student.firstName} ${student.lastName}`,
+            teacher: sd.teacher || '', classKey: _healthClassKey(sd), date,
+          });
+        }
       });
     });
-    return flags;
+    return rows.sort((a, b) =>
+      a.date.localeCompare(b.date) ||
+      a.teacher.localeCompare(b.teacher) ||
+      a.studentName.localeCompare(b.studentName));
   },
 
-  // Audit check: students with >= threshold total 'absent' marks in this
-  // session (not necessarily consecutive — see auditAbsencesConsecutive for
-  // that). grouping/groupKey optionally scope to one class/teacher, same
-  // convention as the other audit checks. threshold defaults to 3 (hardcoded
-  // for now; may become an admin-configurable setting later).
-  // Returns [{ studentId, studentName, absentCount }], sorted by absentCount
-  // descending.
-  auditAbsencesTotal(sessionName, grouping, groupKey, threshold = 3) {
-    return _matchingStudents(sessionName, grouping, groupKey)
-      .map(({ student, sd }) => {
-        const absentCount = Object.values(sd.attendance || {}).filter(v => v === 'absent').length;
-        return { id: student.id, studentId: student.studentId, studentName: `${student.firstName} ${student.lastName}`, absentCount };
-      })
-      .filter(r => r.absentCount >= threshold)
-      .sort((a, b) => b.absentCount - a.absentCount);
-  },
-
-  // Audit check: students with a run of >= threshold consecutive 'absent'
-  // marks in this session (back-to-back class dates, not just a total
-  // count — see auditAbsencesTotal for that). Only class dates that have
-  // already happened (<= today) are considered, in session.classDates
-  // order, so a future unmarked date can't fake or break a streak.
-  // 'present' and 'vacation' (displayed "Excused") both break the streak —
-  // only consecutive 'absent' marks count. threshold defaults to 2.
-  // Returns [{ studentId, studentName, consecutiveCount }], sorted by
-  // consecutiveCount descending.
-  auditAbsencesConsecutive(sessionName, grouping, groupKey, threshold = 2) {
+  // Audit check: students who missed >= threshold classes in this session,
+  // counting BOTH unexcused ('absent') and excused ('vacation') absences, on
+  // class dates up to and including today. A student is listed once, with the
+  // split, the dates (oldest first, each tagged excused or not) and the longest
+  // run of back-to-back missed classes (absent or excused; a present or blank
+  // mark breaks the run). grouping/groupKey optionally scope to one
+  // class/teacher, same convention as the other audit checks. threshold
+  // defaults to 2; the Audit page lets the user change it.
+  // Returns [{ id, studentId, studentName, missedCount, absentCount,
+  // excusedCount, longestRun, dates: [{ date, excused }] }], most missed first.
+  auditMissedClasses(sessionName, grouping, groupKey, threshold = 2) {
     const sess = this.getSession(sessionName);
     const today = _todayLocal();
-    const pastDates = (sess?.classDates || []).filter(d => d <= today);
-
+    const classDates = (sess?.classDates || []).filter(d => d <= today).sort();
+    if (!classDates.length) return [];
     return _matchingStudents(sessionName, grouping, groupKey)
       .map(({ student, sd }) => {
-        const att = sd.attendance || {};
-        let longest = 0, current = 0;
-        pastDates.forEach(date => {
-          if (att[date] === 'absent') {
-            current++;
-            longest = Math.max(longest, current);
-          } else {
-            current = 0;
-          }
-        });
-        return { id: student.id, studentId: student.studentId, studentName: `${student.firstName} ${student.lastName}`, consecutiveCount: longest };
+        const { dates, longestRun } = _missedClassDatesFor(sd.attendance, classDates);
+        const excusedCount = dates.filter(x => x.excused).length;
+        return {
+          id: student.id, studentId: student.studentId,
+          studentName: `${student.firstName} ${student.lastName}`,
+          missedCount: dates.length, absentCount: dates.length - excusedCount,
+          excusedCount, longestRun, dates,
+        };
       })
-      .filter(r => r.consecutiveCount >= threshold)
-      .sort((a, b) => b.consecutiveCount - a.consecutiveCount);
-  },
-
-  // Audit check: classes where turnout (present / enrolled) on the most
-  // recent past class date fell below threshold (default 50%). classDates
-  // are shared across all classes in a session, so "most recent past date"
-  // is the same single date for every class — this is a point-in-time
-  // signal (last class only), not a rolling average. A class with no
-  // enrolled students, or no past class date yet, is skipped (nothing
-  // meaningful to compute). grouping/groupKey optionally scope which
-  // classes are checked, same convention as the other audit checks.
-  // Returns [{ classKey, classLabel, date, presentCount, enrolledCount,
-  // turnoutFraction }], sorted by turnoutFraction ascending (worst first).
-  auditLowTurnout(sessionName, grouping, groupKey, threshold = 0.5) {
-    const sess = this.getSession(sessionName);
-    const today = _todayLocal();
-    const pastDates = (sess?.classDates || []).filter(d => d <= today);
-    if (!pastDates.length) return [];
-    const lastDate = pastDates[pastDates.length - 1];
-
-    let classGroups = this.healthGroups(sessionName, 'class');
-    if (grouping === 'class') {
-      classGroups = classGroups.filter(g => g.key === groupKey);
-    } else if (grouping === 'teacher') {
-      classGroups = classGroups.filter(g => g.key.split('|')[0] === groupKey);
-    }
-
-    const flags = [];
-    classGroups.forEach(({ key, label }) => {
-      const sds = _matchingStudents(sessionName, 'class', key).map(({ sd }) => sd);
-      const enrolledCount = sds.length;
-      if (!enrolledCount) return;
-      const presentCount = sds.filter(sd => (sd.attendance || {})[lastDate] === 'present').length;
-      const turnoutFraction = presentCount / enrolledCount;
-      if (turnoutFraction < threshold) {
-        flags.push({ classKey: key, classLabel: label, date: lastDate, presentCount, enrolledCount, turnoutFraction });
-      }
-    });
-    return flags.sort((a, b) => a.turnoutFraction - b.turnoutFraction);
+      .filter(r => r.missedCount >= threshold)
+      .sort((a, b) => b.missedCount - a.missedCount || a.studentName.localeCompare(b.studentName));
   },
 
   // Audit check: classes whose most recent homework broadcast (see
@@ -1611,7 +1578,7 @@ function seedStudentsIfEmpty() {
 // in the top nav bar and checkable via console (APP_VERSION), so
 // it's always possible to tell which version a saved file or a
 // deployed site is actually running. Format: v<date>.<n>
-const APP_VERSION = 'v2026-10-13.3';
+const APP_VERSION = 'v2026-10-27.11';
 
 // ── STATE ────────────────────────────────────────────────────
 // Device detection — set once at boot, used for mobile-specific behavior
@@ -1623,6 +1590,8 @@ let currentSort = { col: 'name', dir: 'asc' }; // directory sort state
 let _emailPreselectIds = []; // student IDs pre-selected from fees tracker (or other sources)
 let _emailPreselectLabel = ''; // describes why, shown in the Send Email banner
 let _emailPreselectTemplate = null; // { subject, body } to auto-fill, one-time use
+let _emailArrivedFromAudit = false; // one-shot: renderEmail keeps _emailAbsenceSession only when true
+let _emailAbsenceSession = ''; // session the {{absenceCount}}/{{absenceDates}} merge fields read; '' = same session as the other merge fields
 
 // Replaces all window._* globals with a single managed state object
 const AppState = {
@@ -6854,7 +6823,11 @@ function renderEmail() {
   const isAdmin     = currentUser.role === 'admin';
   const isTeacher   = currentUser.role === 'teacher';
   const activeSessName = (SessionEngine.getActiveSession() || sessions.slice(-1)[0])?.name || '';
+  // Absence merge fields exist only when arriving from the Audit page.
+  if (!_emailArrivedFromAudit) _emailAbsenceSession = '';
+  _emailArrivedFromAudit = false;
   const placeholders = ['{{studentFirstName}}','{{studentLastName}}','{{parentFirstName}}','{{sessionName}}','{{studentId}}','{{classTime}}','{{classLevel}}','{{bookNumber}}','{{teacher}}'];
+  const absencePlaceholders = _emailAbsenceSession ? ['{{absenceCount}}','{{absenceDates}}'] : [];
   const settings    = DB.getSettings();
   const templates   = DB.getTemplates().slice().sort((a, b) => naturalCompare(a.name || '', b.name || ''));
 
@@ -6871,12 +6844,12 @@ function renderEmail() {
       <div class="card">
         <div class="card-title">Recipients</div>
         <div class="filter-bar" style="margin-bottom:12px;">
-          <select class="form-select" id="email-filter-status" onchange="_emailPreselectIds=[];loadEmailRecipients()"
+          <select class="form-select" id="email-filter-status" onchange="_emailPreselectIds=[];_emailAbsenceSession='';loadEmailRecipients()"
             style="appearance:none; -webkit-appearance:none; background-image:url('data:image/svg+xml;utf8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 12 12%22%3E%3Cpath d=%22M2.5 4.5L6 8L9.5 4.5%22 stroke=%22%235A5A40%22 stroke-width=%221.8%22 fill=%22none%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/%3E%3C/svg%3E'); background-repeat:no-repeat; background-position:right 10px center; padding-right:28px;">
             <option value="">All statuses</option>
             ${STUDENT_STATUSES.map(s => `<option value="${s}">${s}</option>`).join('')}
           </select>
-          ${_renderMultiSelectFilter('session', 'All sessions', sessions.map(s => s.name), [activeSessName])}
+          ${_renderMultiSelectFilter('session', 'All sessions', sessions.map(s => s.name), [_emailAbsenceSession || activeSessName])}
           ${_renderMultiSelectFilter('level', 'All levels', DB.getClassLevels(), [])}
           ${_renderMultiSelectFilter('teacher', 'All teachers', isAdmin ? DB.teacherNames() : [currentUser.name], [])}
           <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--ink-mid); cursor:pointer; white-space:nowrap;">
@@ -6932,7 +6905,7 @@ function renderEmail() {
         ` : ''}
         <div style="margin-bottom:12px;">
           <div style="font-size:11px; font-weight:700; color:var(--ink-light); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">MailMerge — click to insert</div>
-          <div>${placeholders.map(p => `<span class="placeholder-chip" onclick="insertPlaceholder('${p}')">${p}</span>`).join('')}</div>
+          <div>${placeholders.concat(absencePlaceholders).map(p => `<span class="placeholder-chip" onclick="insertPlaceholder('${p}')">${p}</span>`).join('')}</div>
         </div>
         <div class="form-group" style="margin-bottom:12px;">
           <label class="form-label">Subject</label>
@@ -6971,13 +6944,6 @@ function renderEmail() {
             <button class="btn btn-secondary btn-sm" onclick="openSaveTemplateDialog()" style="font-size:12px;">💾 Save as template</button>
           </div>
         ` : ''}
-        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px; padding:10px 12px; background:var(--olive-pale); border-radius:var(--radius-md);">
-          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; font-weight:500; color:var(--ink-mid);">
-            <input type="checkbox" id="whatsapp-also" style="accent-color:#25D366; width:16px; height:16px;"/>
-            <span>💬 Also send via WhatsApp</span>
-          </label>
-          <span style="font-size:11px; color:var(--ink-light);">Opens WhatsApp for each recipient with the message pre-filled</span>
-        </div>
         <button class="btn btn-primary w-full" id="send-btn" onclick="sendEmailGmail()" style="justify-content:center; font-size:14px;">
           ✉️ Send emails
         </button>
@@ -6996,7 +6962,7 @@ function renderEmail() {
     banner.id = 'fee-reminder-banner';
     banner.style.cssText = 'background:var(--orange-light);border:1px solid rgba(242,125,38,0.3);border-radius:var(--radius-md);padding:10px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--orange-dark);';
     banner.innerHTML = `<span>📌 Pre-selected <strong>${_emailPreselectIds.length} student${_emailPreselectIds.length !== 1 ? 's' : ''}</strong>${_emailPreselectLabel ? ' ' + escHtml(_emailPreselectLabel) : ''}</span>
-      <button class="btn btn-ghost btn-sm" onclick="_emailPreselectIds=[];_emailPreselectLabel='';renderEmail();" style="color:var(--orange-dark);font-size:11px;">✕ Clear</button>`;
+      <button class="btn btn-ghost btn-sm" onclick="_emailPreselectIds=[];_emailPreselectLabel='';_emailAbsenceSession='';renderEmail();" style="color:var(--orange-dark);font-size:11px;">✕ Clear</button>`;
     const contentArea = document.getElementById('content-area');
     contentArea.insertBefore(banner, contentArea.firstChild);
   }
@@ -7350,32 +7316,6 @@ async function sendEmailGmail() {
       console.warn('Audit copy to info@ failed:', e.message);
     }
   }
-
-  // WhatsApp: if checkbox is ticked, open WhatsApp for each recipient with phone number
-  const doWhatsApp = document.getElementById('whatsapp-also')?.checked;
-  if (doWhatsApp && students.length > 0) {
-    // Show a panel listing recipients with WhatsApp buttons
-    const waPanel = document.createElement('div');
-    waPanel.style.cssText = 'margin-top:16px; padding:14px; background:var(--olive-pale); border-radius:var(--radius-md);';
-    waPanel.innerHTML =
-      '<div style="font-size:13px; font-weight:600; color:var(--olive); margin-bottom:10px;">💬 Send via WhatsApp</div>' +
-      '<div style="font-size:12px; color:var(--ink-light); margin-bottom:10px;">Click each button to open WhatsApp with the message pre-filled for that parent.</div>' +
-      students.map(s => {
-        const phone = (s.phone || '').replace(/\D/g,'');
-        const msg = encodeURIComponent(resolvePlaceholders(body, s));
-        const waUrl = phone ? `https://wa.me/1${phone}?text=${msg}` : '';
-        return '<div style="display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--cream-dark);">' +
-          '<span style="font-size:13px;">' + escHtml(s.firstName) + ' ' + escHtml(s.lastName) +
-            '<span style="font-size:11px; color:var(--ink-light); margin-left:8px;">' + escHtml(phone ? phone : 'No phone on file') + '</span>' +
-          '</span>' +
-          (waUrl
-            ? '<a href="' + waUrl + '" target="_blank" class="btn btn-success btn-sm" style="font-size:11px; text-decoration:none;">💬 Open WhatsApp</a>'
-            : '<span style="font-size:11px; color:var(--ink-light);">No phone</span>') +
-        '</div>';
-      }).join('') +
-      '<div style="margin-top:10px; font-size:11px; color:var(--ink-light);">Phone numbers are assumed to be US (+1). Edit if needed in the URL.</div>';
-    document.getElementById('send-log').after(waPanel);
-  }
 }
 
 function resolvePlaceholders(text, student) {
@@ -7385,11 +7325,29 @@ function resolvePlaceholders(text, student) {
                 || {};
   const sessName = sessData.session || activeSess?.name || '';
   const sess = DB.getSession(sessName) || {};
+
+  // Absence fields: only worked out when the text actually uses them. Counts
+  // unexcused plus excused absences on class dates up to today, e.g.
+  // "Sep 12 (excused), Oct 10 and Oct 17".
+  let absenceCount = '', absenceDates = '';
+  if (text.includes('{{absenceCount}}') || text.includes('{{absenceDates}}')) {
+    const absSessName = _emailAbsenceSession || sessName;
+    const absClassDates = ((DB.getSession(absSessName) || {}).classDates || []).filter(d => d <= _todayLocal()).sort();
+    const absSd = (student.sessionData || []).find(d => d.session === absSessName) || {};
+    const missed = _missedClassDatesFor(absSd.attendance, absClassDates).dates;
+    const parts = missed.map(x =>
+      new Date(x.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + (x.excused ? ' (excused)' : ''));
+    absenceCount = String(missed.length);
+    absenceDates = parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : (parts[0] || '');
+  }
+
   return text
+    .replace(/{{absenceCount}}/g,     absenceCount)
+    .replace(/{{absenceDates}}/g,     absenceDates)
     .replace(/{{studentFirstName}}/g, student.firstName || '')
     .replace(/{{studentLastName}}/g,  student.lastName  || '')
     .replace(/{{parentFirstName}}/g,  student.parentFirstName || '')
-    .replace(/{{sessionName}}/g,      sessName)
+    .replace(/{{sessionName}}/g,      _emailAbsenceSession || sessName)
     .replace(/{{fees}}/g,             `$${sess.fees || ''}`)
     .replace(/{{studentId}}/g,        student.studentId || 'Pending')
     .replace(/{{classTime}}/g,        sessData.classTime || '')
@@ -8058,18 +8016,31 @@ function saveHealthNote() {
 // mirroring the audit-function convention, but deliberately NOT reusing
 // _healthState — these are six independent checks, not a single
 // metric/series pair.
-let _auditState = { session: '', grouping: '', groupKey: '' };
+let _auditState = { session: '', grouping: '', groupKey: '', missedN: 2 };
+
+// Default filter for the current _auditState.session: a teacher starts on their
+// own classes, everyone else (admin/viewer) on the whole school. If the teacher
+// has no classes in this session there is nothing to filter to, so fall back to
+// the whole school instead of showing a misleading all-clear.
+function _auditApplyDefaultFilter() {
+  _auditState.grouping = '';
+  _auditState.groupKey = '';
+  if (currentUser.role === 'teacher' && currentUser.name) {
+    const me = currentUser.name.toLowerCase();
+    const mine = DB.healthGroups(_auditState.session, 'teacher').find(g => g.key.toLowerCase() === me);
+    if (mine) {
+      _auditState.grouping = 'teacher';
+      _auditState.groupKey = mine.key;
+    }
+  }
+}
 
 function renderAuditLogs() {
   const sessions = sortSessionsChronological(DB.getSessions());
   const activeSess = SessionEngine.getActiveSession() || sessions[sessions.length - 1];
   _auditState.session = activeSess?.name || '';
-  _auditState.grouping = '';
-  _auditState.groupKey = '';
-  if (currentUser.role === 'teacher' && currentUser.name) {
-    _auditState.grouping = 'teacher';
-    _auditState.groupKey = currentUser.name;
-  }
+  _auditState.missedN = 2; // "Missed classes" threshold starts at 2 each time the page opens
+  _auditApplyDefaultFilter();
 
   document.getElementById('content-area').innerHTML = `
     <div class="page-header">
@@ -8117,9 +8088,52 @@ function _populateAuditFilterOptions() {
 
 function onAuditSessionChange() {
   _auditState.session = document.getElementById('audit-session').value;
-  _auditState.grouping = '';
-  _auditState.groupKey = '';
+  _auditApplyDefaultFilter();
   _populateAuditFilterOptions();
+  renderAuditPanels();
+}
+
+// Hands the students in the "Missed classes" panel to Send Email with the
+// absence template filled in. Wording depends on whether the audited session
+// has finished (end-of-session note + next session) or is still running.
+function emailMissedFromAudit() {
+  const { session, grouping, groupKey } = _auditState;
+  const n = _auditState.missedN || 2;
+  const rows = DB.auditMissedClasses(session, grouping, groupKey, n);
+  if (!rows.length) { showToast('No students to email', 'warning'); return; }
+  const fmtLong = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+  const dates = ((DB.getSession(session) || {}).classDates || []).slice().sort();
+  const lastDate = dates[dates.length - 1] || '';
+  const ended = !!lastDate && _todayLocal() > lastDate;
+  let next = null;
+  DB.getSessions().forEach(x => {
+    const first = ((x.classDates || []).slice().sort())[0];
+    if (first && lastDate && first > lastDate && (!next || first < next.first)) next = { name: x.name, first };
+  });
+  const intro = ended
+    ? "As {{sessionName}} has come to a close, we wanted to share a quick note about {{studentFirstName}}'s attendance."
+    : "We wanted to share a quick note about {{studentFirstName}}'s attendance so far in {{sessionName}}.";
+  const outro = (ended && next)
+    ? `As we head into ${next.name}, which begins on ${fmtLong(next.first)}, we hope to see {{studentFirstName}} in class every week.`
+    : "We hope to see {{studentFirstName}} in class every week.";
+  _emailPreselectIds = rows.map(r => r.id);
+  _emailPreselectLabel = `who missed ${n} or more classes in ${session}`;
+  _emailPreselectTemplate = {
+    subject: "{{studentFirstName}}'s attendance in {{sessionName}}",
+    body: "Dear {{parentFirstName}},<br><br>" + intro +
+      " {{studentFirstName}} missed {{absenceCount}} classes this session, on {{absenceDates}}.<br><br>" +
+      "We know that life gets busy, and we are glad to have {{studentFirstName}} in our Hindi class. Regular attendance makes a big difference for children learning a language, because each class builds on the one before it. " + outro + "<br><br>" +
+      "If something is making it hard to attend, or if you think we have an absence recorded in error, please let us know at portal@hindikineev.org and we will be happy to help.<br><br>" +
+      "Thank you for being part of {{studentFirstName}}'s Hindi learning journey!<br><br>Warm regards,<br>The HKN Team",
+  };
+  _emailAbsenceSession = session;
+  _emailArrivedFromAudit = true;
+  navigateTo('email');
+}
+
+function onAuditMissedNChange(val) {
+  const n = parseInt(val, 10);
+  _auditState.missedN = n >= 1 ? n : 2;
   renderAuditPanels();
 }
 
@@ -8141,50 +8155,54 @@ function onAuditFilterChange() {
 function renderAuditPanels() {
   const { session, grouping, groupKey } = _auditState;
 
-  const unmarked   = DB.auditUnmarkedClasses(session, grouping, groupKey);
-  const absTotal   = DB.auditAbsencesTotal(session, grouping, groupKey);
-  const absConsec  = DB.auditAbsencesConsecutive(session, grouping, groupKey);
-  const lowTurnout = DB.auditLowTurnout(session, grouping, groupKey);
+  const unmarked   = DB.auditAttendanceUnmarked(session, grouping, groupKey);
+  const missedN    = _auditState.missedN || 2;
+  const missed     = DB.auditMissedClasses(session, grouping, groupKey, missedN);
   const missingHw  = DB.auditMissingHomework(session, grouping, groupKey);
   const staleNotes = DB.auditStaleNotes(session, grouping, groupKey);
 
   document.getElementById('audit-panels').innerHTML = `
-    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:16px;">
-      ${_auditPanelHtml('🚫 Class attendance unmarked', unmarked, f => ({
-        onclick: `goToClassFromAudit('${f.classKey.replace(/'/g, "\\'")}')`,
-        label: `${escHtml(f.classLabel)} — ${escHtml(f.date)}`,
-      }))}
-      ${_auditPanelHtml('📉 Student absent 3+ times', absTotal, f => ({
-        onclick: `openStudentModal('${f.id}')`,
-        label: `${escHtml(f.studentName)} — ${f.absentCount} absences`,
-      }))}
-      ${_auditPanelHtml('⏭️ Student absent 2+ in a row', absConsec, f => ({
-        onclick: `openStudentModal('${f.id}')`,
-        label: `${escHtml(f.studentName)} — ${f.consecutiveCount} in a row`,
-      }))}
-      ${_auditPanelHtml('📊 Low turnout (last class < 50%)', lowTurnout, f => ({
-        onclick: `goToClassFromAudit('${f.classKey.replace(/'/g, "\\'")}')`,
-        label: `${escHtml(f.classLabel)} — ${f.presentCount}/${f.enrolledCount} on ${escHtml(f.date)}`,
-      }))}
-      ${_auditPanelHtml('📚 Missing homework (2+ weeks)', missingHw, f => ({
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap:16px; align-items:start;">
+      <div>
+      ${_auditPanelHtml(
+        `📋 Missed classes <select class="form-select" onchange="onAuditMissedNChange(this.value)" style="display:inline-block; width:auto; padding:2px 24px 2px 8px; font-size:12px; margin-left:6px;">${[2, 3, 4].map(n => `<option value="${n}" ${n === missedN ? 'selected' : ''}>${n} or more</option>`).join('')}</select>${missed.length ? ` <button class="btn btn-secondary btn-sm" style="margin-left:6px;" onclick="emailMissedFromAudit()">✉ Email these parents (${missed.length})</button>` : ''}`,
+        missed, f => {
+          const fmt = d => escHtml(new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+          const split = [f.absentCount ? `${f.absentCount} absent` : '', f.excusedCount ? `${f.excusedCount} excused` : ''].filter(Boolean).join(', ');
+          return {
+            onclick: `openStudentModal('${f.id}')`,
+            label: `${escHtml(f.studentName)} — ${f.missedCount} missed (${split})${f.longestRun >= 2 ? ` · ${f.longestRun} in a row` : ''}` +
+                   `<div style="font-size:11px; color:var(--ink-light); margin-top:2px;">${f.dates.map(x => fmt(x.date) + (x.excused ? ' (excused)' : '')).join(', ')}</div>`,
+          };
+        }, '72vh')}
+      </div>
+      <div style="display:flex; flex-direction:column; gap:16px;">
+      ${_auditPanelHtml('🚫 Attendance not marked', unmarked, f => ({
+        // Take the teacher to the class to fix it; a student with no teacher
+        // assigned has no class to open, so open the student record instead.
+        onclick: f.teacher ? `goToClassFromAudit('${f.classKey.replace(/'/g, "\\'")}')` : `openStudentModal('${f.id}')`,
+        label: `${escHtml(f.studentName)} — ${escHtml(new Date(f.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }))} — ${escHtml(f.teacher || 'no teacher')}`,
+      }), '220px')}
+      ${_auditPanelHtml('📚 Homework not posted by teacher (2+ weeks)', missingHw, f => ({
         onclick: `goToClassFromAudit('${f.classKey.replace(/'/g, "\\'")}')`,
         label: `${escHtml(f.classLabel)} — ${f.lastHomeworkDate ? `last: ${escHtml(f.lastHomeworkDate)}` : 'never'}`,
-      }))}
+      }), '220px')}
       ${_auditPanelHtml('📝 Personal Note (3+ weeks old)', staleNotes, f => ({
         onclick: `openStudentModal('${f.id}')`,
         label: `${escHtml(f.studentName)} — last noted ${escHtml(f.lastNoteDate)}`,
-      }))}
+      }), '220px')}
+      </div>
     </div>
   `;
 }
 
 // rowFn(item) returns { onclick, label } — label is already-escaped display
 // text, onclick is a plain JS call expression (no surrounding quotes).
-function _auditPanelHtml(title, items, rowFn) {
+function _auditPanelHtml(title, items, rowFn, maxHeight) {
   return `
     <div class="card">
       <div class="card-title">${title}</div>
-      <div style="margin-top:8px;">
+      <div style="margin-top:8px;${maxHeight ? ` max-height:${maxHeight}; overflow-y:auto;` : ''}">
         ${items.length ? items.map(f => {
           const { onclick, label } = rowFn(f);
           return `
