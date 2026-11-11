@@ -1624,7 +1624,7 @@ function seedStudentsIfEmpty() {
 // in the top nav bar and checkable via console (APP_VERSION), so
 // it's always possible to tell which version a saved file or a
 // deployed site is actually running. Format: v<date>.<n>
-const APP_VERSION = 'v2026-11-10.4';
+const APP_VERSION = 'v2026-11-10.16';
 
 // ── STATE ────────────────────────────────────────────────────
 // Device detection — set once at boot, used for mobile-specific behavior
@@ -1971,6 +1971,7 @@ function buildSidebar() {
     { id:'classes',  icon:'🏫', label:'Classes' },
     { id:'scoring-guide', icon:'📖', label:'Scoring guide' },
     { id:'school-health', icon:'📈', label:'School Health' },
+    ...(isAdmin ? [{ id:'capacity', icon:'🧮', label:'Capacity planning' }] : []),
     { id:'audit-logs', icon:'🔍', label:'Audit Logs' },
     ...(isAdmin ? [
       { id:'attributes', icon:'⚙️', label:'Settings', children: ATTR_TABS },
@@ -2029,6 +2030,7 @@ function navigateTo(page) {
     classes:     renderClasses,
     'scoring-guide': renderScoringGuide,
     'school-health': renderSchoolHealth,
+    capacity:        renderCapacityPlanning,
     'audit-logs':    renderAuditLogs,
     attributes:  renderAttributesChooser,
     email:       renderEmail,
@@ -2039,6 +2041,371 @@ function navigateTo(page) {
   const fn = pages[page];
   if (fn) fn();
 
+}
+
+// ── CAPACITY PLANNING (admin, read-only projections; only the plan numbers are saved) ──
+function _capPlan() {
+  const p = (DB.getSettings() || {}).capacityPlan || {};
+  return {
+    defaultRate: Number.isFinite(p.defaultRate) ? p.defaultRate : 85,   // % of unanswered families assumed to continue
+    ageCutoff:   Number.isFinite(p.ageCutoff)   ? p.ageCutoff   : 10,
+    rate:        p.rate        || {},   // per current level, overrides defaultRate
+    newByLevel:  p.newByLevel  || {},   // expected brand-new students per next-year level
+    sections:    p.sections    || {},   // per next-year level
+    perSection:  p.perSection  || {},
+    stay:        p.stay        || {},   // per current level: students who repeat the level next year
+    teachers:    p.teachers    || {},   // free text per next-year level, e.g. "Anjini, Rina"
+  };
+}
+
+function _capSessionIdx() {
+  const m = {};
+  // sortSessionsChronological returns newest first, so reverse it: a higher index = a later session
+  sortSessionsChronological(DB.getSessions()).reverse().forEach((s, i) => { m[s.name] = i; });
+  return m;
+}
+
+// Most recent level on record for a student (latest session that has a class level)
+function _capCurrentLevel(s, idx) {
+  let best = null, bi = -1;
+  (s.sessionData || []).forEach(sd => {
+    if (!sd.classLevel) return;
+    const i = idx[sd.session] ?? -1;
+    if (i >= bi) { bi = i; best = sd.classLevel; }
+  });
+  return best;
+}
+
+function _capYearsInSchool(s) {
+  const sessions = DB.getSessions();
+  let earliest = null;
+  (s.sessionData || []).forEach(sd => {
+    const se = sessions.find(x => x.name === sd.session);
+    let d = null;
+    if (se && se.classDates && se.classDates.length) d = new Date(se.classDates[0] + 'T12:00:00');
+    else if (se && se.year) d = new Date(se.year, (se.term === 'Fall' ? 8 : se.term === 'Winter' ? 0 : 3), 1);
+    if (d && !isNaN(d) && (!earliest || d < earliest)) earliest = d;
+  });
+  return earliest ? (Date.now() - earliest.getTime()) / (365.25 * 86400000) : null;
+}
+
+function _capAge(s) {
+  if (!s.dob) return null;
+  const d = new Date(s.dob + 'T12:00:00');
+  return isNaN(d) ? null : (Date.now() - d.getTime()) / (365.25 * 86400000);
+}
+
+function _capCompute() {
+  const plan = _capPlan();
+  const levels = DB.getClassLevels();
+  const idx = _capSessionIdx();
+  const settings = DB.getSettings() || {};
+  // Reference session = the session that is running now (or the latest one that has started), i.e. the
+  // one families are moving up FROM. Based on class dates, not on the enrollment-open flag, so a session
+  // that is open for enrollment but hasn't started (or a test session) is never mistaken for it.
+  const today = _todayLocal();
+  const started = DB.getSessions()
+    .filter(s => (s.classDates || []).length && s.classDates[0] <= today)
+    .sort((a, b) => (b.classDates[0] > a.classDates[0] ? 1 : -1));
+  let candidates = started.map(s => s.name);
+  if (!candidates.length) {   // sessions without class dates: fall back to the current session, then older ones
+    const asc = sortSessionsChronological(DB.getSessions()).reverse();
+    const cur = SessionEngine.getActiveSession();
+    const from = cur ? asc.findIndex(s => s.name === cur.name) : asc.length - 1;
+    for (let k = from; k >= 0; k--) candidates.push(asc[k].name);
+  }
+  const real = (s, name) => (s.sessionData || []).some(sd => sd.session === name && (sd.classLevel || sd.feesPaid));
+  const pool = DB.getStudents().filter(s => s.status === 'Active' || s.status === 'Alumni');
+  let refSession = '', students = [];
+  for (const name of candidates) {
+    const grp = pool.filter(s => real(s, name));
+    if (grp.length) { refSession = name; students = grp; break; }
+  }
+  // Which session's confirmation answers to read: the open window, else the newest one recorded
+  let planSession = settings.reconfirmSession || '';
+  if (!planSession) {
+    let bi = -1;
+    students.forEach(s => { const r = s.reenrollIntent; if (r && r.session && (idx[r.session] ?? -1) >= bi) { bi = idx[r.session] ?? -1; planSession = r.session; } });
+  }
+  const rows = {};
+  const row = l => rows[l] || (rows[l] = { total: 0, cont: 0, notc: 0, none: 0, old: 0, oldNew: 0 });
+  students.forEach(s => {
+    const refSd = (s.sessionData || []).find(sd => sd.session === refSession);
+    const lvl = (refSd && refSd.classLevel) || '(no level)';
+    const r = row(lvl);
+    r.total++;
+    const i = s.reenrollIntent;
+    if (i && i.session === planSession && typeof i.continuing === 'boolean') { if (i.continuing) r.cont++; else r.notc++; }
+    else r.none++;
+    const age = _capAge(s), yrs = _capYearsInSchool(s);
+    if (age !== null && age >= plan.ageCutoff) { r.old++; if (yrs !== null && yrs < 2) r.oldNew++; }
+  });
+  const next = {};
+  levels.forEach((l, i) => {
+    const r = rows[l]; if (!r) return;
+    const rate = (Number.isFinite(plan.rate[l]) ? plan.rate[l] : plan.defaultRate) / 100;
+    const target = i + 1 < levels.length ? levels[i + 1] : '(graduating)';
+    const proj = r.cont + r.none * rate;
+    const stay = Math.min(Number(plan.stay[l]) || 0, proj);   // repeaters stay in this level
+    next[l] = (next[l] || 0) + stay;
+    next[target] = (next[target] || 0) + (proj - stay);
+  });
+  const interest = DB.getStudents().filter(s => s.status === 'Interest').length;
+  const ay = getAcademicYear(refSession);
+  const fallFrom = ay ? 'Fall-' + ay : refSession, fallTo = ay ? 'Fall-' + (ay + 1) : 'next year';
+  return { plan, levels, rows, next, planSession, refSession, fallFrom, fallTo, interest, total: students.length };
+}
+
+function renderCapacityPlanning() {
+  if (currentUser.role !== 'admin') { document.getElementById('content-area').innerHTML = ''; return; }
+  const c = _capCompute();
+  const { plan, levels, rows, next } = c;
+  const num = (id, val, w, extra) => `<input type="number" min="0" id="${id}" value="${val === undefined || val === null ? '' : val}" class="form-input" style="width:${w}px; padding:4px 6px;" onchange="onCapChange()" ${extra || ''}/>`;
+  const curRows = levels.concat(rows['(no level)'] ? ['(no level)'] : []).filter(l => rows[l]).map(l => {
+    const r = rows[l];
+    const rate = Number.isFinite(plan.rate[l]) ? plan.rate[l] : '';
+    return `<tr>
+      <td><strong>${escHtml(l)}</strong></td>
+      <td style="text-align:right;">${r.total}</td>
+      <td style="text-align:right; color:var(--olive);">${r.cont}</td>
+      <td style="text-align:right; color:var(--danger);">${r.notc}</td>
+      <td style="text-align:right;">${r.none}</td>
+      <td style="text-align:right;">${r.old}</td>
+      <td style="text-align:right;">${r.oldNew}</td>
+      <td style="text-align:right;">${l === '(no level)' ? '' : num('cap-rate-' + levels.indexOf(l), rate, 64, `placeholder="${plan.defaultRate}"`)}</td>
+      <td style="text-align:right;">${l === '(no level)' ? '' : num('cap-stay-' + levels.indexOf(l), plan.stay[l], 56)}</td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="9" style="color:var(--ink-light); padding:12px;">No Active students with a class level yet.</td></tr>`;
+  const nextRows = levels.map(l => {
+    const fromPrev = next[l] || 0;
+    const nw = Number(plan.newByLevel[l]) || 0;
+    const proj = fromPrev + nw;
+    const cap = (Number(plan.sections[l]) || 0) * (Number(plan.perSection[l]) || 0);
+    const diff = Math.round(proj) - cap;
+    const hasCap = cap > 0;
+    return `<tr>
+      <td><strong>${escHtml(l)}</strong></td>
+      <td style="text-align:right;">${fromPrev ? fromPrev.toFixed(1) : '–'}</td>
+      <td style="text-align:right;">${num('cap-new-' + levels.indexOf(l), plan.newByLevel[l], 64)}</td>
+      <td style="text-align:right; font-weight:600;">${proj ? Math.round(proj) : '–'}</td>
+      <td style="text-align:right;">${num('cap-sec-' + levels.indexOf(l), plan.sections[l], 56)}</td>
+      <td style="text-align:right;">${num('cap-per-' + levels.indexOf(l), plan.perSection[l], 56)}</td>
+      <td style="text-align:right;">${hasCap ? cap : '–'}</td>
+      <td style="text-align:right; font-weight:600; color:${!hasCap ? 'var(--ink-light)' : diff > 0 ? 'var(--danger)' : 'var(--olive)'};">${hasCap ? (diff > 0 ? '+' + diff + ' over' : diff < 0 ? (-diff) + ' free' : 'full') : '–'}</td>
+      <td><input type="text" id="cap-tch-${levels.indexOf(l)}" value="${escAttr(plan.teachers[l] || '')}" class="form-input" style="min-width:180px; padding:4px 6px;" placeholder="e.g. Anjini, Rina" onchange="onCapChange()"/></td>
+    </tr>`;
+  }).join('');
+  const grad = next['(graduating)'] ? `<div style="font-size:12px; color:var(--ink-light); margin-top:8px;">Graduating from the top level: about ${next['(graduating)'].toFixed(1)} students.</div>` : '';
+  const th = 'style="text-align:right; font-size:11px; text-transform:uppercase; letter-spacing:0.04em; color:var(--ink-light); padding:6px 8px;"';
+  document.getElementById('content-area').innerHTML = `
+    <div class="page-header">
+      <div class="page-title">Capacity planning</div>
+      <div class="page-subtitle">${escHtml(c.fallFrom)} → ${escHtml(c.fallTo)}: projection from the current students and the parents' answers. Nothing here changes any student record.</div>
+    </div>
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-end; font-size:13px; color:var(--ink-mid);">
+        <div>Confirmation answers for: <strong>${escHtml(c.planSession || 'none recorded yet')}</strong></div>
+        <div>Based on students in: <strong>${escHtml(c.refSession || 'no session found')}</strong> (${c.total} students)</div>
+        <div>On the interest list (not placed in levels yet): <strong>${c.interest}</strong></div>
+        <div class="form-group" style="margin:0;"><label class="form-label">Unanswered families assumed to continue (%)</label>${num('cap-default-rate', plan.defaultRate, 70)}</div>
+        <div class="form-group" style="margin:0;"><label class="form-label">"Older" means age ≥</label>${num('cap-age', plan.ageCutoff, 60)}</div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:16px; overflow-x:auto;">
+      <div class="card-title">Now: by current level</div>
+      <table style="width:100%; border-collapse:collapse; font-size:13px;">
+        <thead><tr><th style="text-align:left; font-size:11px; text-transform:uppercase; color:var(--ink-light); padding:6px 8px;">Level</th>
+          <th ${th}>Active</th><th ${th}>Continuing</th><th ${th}>Not continuing</th><th ${th}>No answer</th>
+          <th ${th}>Older</th><th ${th} title="Older and in their first or second year at HKN (years counted from the earliest session on record)">Older, ≤2 yrs</th>
+          <th ${th} title="Optional: share of this level's unanswered families you expect to continue. Blank uses the default above.">Assume %</th>
+          <th ${th} title="Students who will stay in this level next year instead of moving up (teacher recommendation)">Staying in level</th></tr></thead>
+        <tbody>${curRows}</tbody>
+      </table>
+    </div>
+    <div class="card" style="overflow-x:auto;">
+      <div class="card-title">${escHtml(c.fallTo)}: projected students vs capacity</div>
+      <table style="width:100%; border-collapse:collapse; font-size:13px;">
+        <thead><tr><th style="text-align:left; font-size:11px; text-transform:uppercase; color:var(--ink-light); padding:6px 8px;">Level</th>
+          <th ${th} title="Students moving up from the level below: continuing plus expected share of unanswered">Moving up</th><th ${th}>New (you enter)</th><th ${th}>Projected</th>
+          <th ${th}>Sections</th><th ${th}>Per section</th><th ${th}>Capacity</th><th ${th}>Over / free</th><th style="text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:0.04em; color:var(--ink-light); padding:6px 8px;">Teachers</th></tr></thead>
+        <tbody>${nextRows}</tbody>
+      </table>
+      ${grad}
+      <div style="font-size:12px; color:var(--ink-light); margin-top:10px;">Everyone moves up one level except the students you list under "Staying in level". "Older, ≤2 yrs" relies on the earliest session recorded in the portal, so for long-time students it can understate their time at HKN.</div>
+    </div>`;
+}
+
+function onCapChange() {
+  const levels = DB.getClassLevels();
+  const v = id => { const el = document.getElementById(id); if (!el || el.value === '') return undefined; const n = parseFloat(el.value); return Number.isFinite(n) ? n : undefined; };
+  const plan = { defaultRate: v('cap-default-rate'), ageCutoff: v('cap-age'), rate: {}, stay: {}, newByLevel: {}, sections: {}, perSection: {}, teachers: {} };
+  levels.forEach((l, i) => {
+    const r = v('cap-rate-' + i); if (r !== undefined) plan.rate[l] = r;
+    const st = v('cap-stay-' + i); if (st !== undefined) plan.stay[l] = st;
+    const n = v('cap-new-' + i);  if (n !== undefined) plan.newByLevel[l] = n;
+    const s = v('cap-sec-' + i);  if (s !== undefined) plan.sections[l] = s;
+    const p = v('cap-per-' + i);  if (p !== undefined) plan.perSection[l] = p;
+    const tn = (document.getElementById('cap-tch-' + i)?.value || '').trim(); if (tn) plan.teachers[l] = tn;
+  });
+  const settings = DB.getSettings();
+  settings.capacityPlan = plan;
+  DB.saveSettings(settings);
+  renderCapacityPlanning();
+}
+
+// ── DASHBOARD REMINDERS (admin): dated tasks the admin can add, tick off and delete ──
+function _remList() { return ((DB.getSettings() || {}).reminders || []).slice(); }
+
+function _remSave(list) {
+  const s = DB.getSettings();
+  s.reminders = list;
+  DB.saveSettings(s);
+  _remRender();
+}
+
+function _remDays(due) {
+  if (!due) return null;
+  const a = new Date(due + 'T12:00:00'), b = new Date(_todayLocal() + 'T12:00:00');
+  return Math.round((a - b) / 86400000);
+}
+
+function _remNextMonth(due) {
+  const d = new Date(due + 'T12:00:00');
+  const day = d.getDate();
+  d.setDate(1); d.setMonth(d.getMonth() + 1);
+  d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
+  const p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
+function remindersCardHtml() {
+  if (currentUser.role !== 'admin') return '';
+  return `<div id="reminders-card">${_remInner()}</div>`;
+}
+
+function _remRender() {
+  const el = document.getElementById('reminders-card');
+  if (el) el.innerHTML = _remInner();
+}
+
+function _remAddDays(d, n) {
+  const x = new Date(d + 'T12:00:00'); x.setDate(x.getDate() + n);
+  const p = v => String(v).padStart(2, '0');
+  return x.getFullYear() + '-' + p(x.getMonth() + 1) + '-' + p(x.getDate());
+}
+
+// Reminders generated from session class dates. Not stored: only the tick / dismiss state is,
+// as small records with id 'auto:<session>:<key>' in settings.reminders.
+function _remAuto() {
+  const today = _todayLocal();
+  const chron = sortSessionsChronological(DB.getSessions() || []).reverse();   // oldest first
+  const stored = _remList();
+  const out = [];
+  chron.forEach((s, i) => {
+    const cd = (s.classDates || []).slice().sort();
+    if (!cd.length) return;
+    const last = cd[cd.length - 1];
+    if (last < _remAddDays(today, -30)) return;                  // ended long ago
+    const nxt = chron[i + 1];
+    const isFall = /^Fall/.test(s.name), isSpring = /^Spring/.test(s.name);
+    const roll = !!nxt && !isSpring;                              // Spring has no roll forward; new enrollment is in Fall
+    const after = _remAddDays(last, 1);
+    const steps = [];
+    steps.push(['scores', after, `Final scores for ${s.name} assigned by all teachers`]);
+    steps.push(['email', after, `Email families who missed 2+ classes: thanks for ${s.name}${isFall ? ' and Happy Thanksgiving' : ''} (Audit page, Missed classes)`]);
+    steps.push(['backup', after, 'Take a JSON backup (Backup page)']);
+    steps.push(['close', after, roll ? `Sessions page: close ${s.name} and open ${nxt.name}` : `Sessions page: close ${s.name}`]);
+    if (roll) {
+      steps.push(['roll', after, `Dashboard: Roll Forward to ${nxt.name}`]);
+      steps.push(['count', after, 'Check the roll-forward count against the Active students']);
+    }
+    steps.forEach(([key, due, text]) => {
+      if (_remDays(due) > 14) return;                             // show from 14 days before it is due
+      const id = 'auto:' + s.name + ':' + key;
+      const st = stored.find(x => x.id === id) || {};
+      if (st.dismissed) return;
+      out.push({ id, text, due, done: !!st.done, doneDate: st.doneDate || '', repeat: '', auto: true });
+    });
+  });
+  return out;
+}
+
+function _remInner() {
+  const list = _remList().filter(r => !String(r.id).startsWith('auto:')).concat(_remAuto());
+  const open = list.filter(r => !r.done).sort((a, b) => (a.due || '9999') < (b.due || '9999') ? -1 : (a.due || '9999') > (b.due || '9999') ? 1 : 0);
+  const done = list.filter(r => r.done).sort((a, b) => (b.doneDate || '') < (a.doneDate || '') ? -1 : 1);
+  const dueCount = open.filter(r => { const d = _remDays(r.due); return d !== null && d <= 3; }).length;
+  const fmt = d => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const row = r => {
+    const d = _remDays(r.due);
+    const tag = d === null ? '' : d < 0 ? `<span style="font-size:11px; font-weight:700; color:var(--danger);">overdue · ${fmt(r.due)}</span>`
+      : d === 0 ? `<span style="font-size:11px; font-weight:700; color:var(--orange);">today</span>`
+      : d <= 7 ? `<span style="font-size:11px; font-weight:600; color:var(--orange);">in ${d} day${d === 1 ? '' : 's'} · ${fmt(r.due)}</span>`
+      : `<span style="font-size:11px; color:var(--ink-light);">${fmt(r.due)}</span>`;
+    return `<div style="display:flex; align-items:flex-start; gap:10px; padding:7px 0; border-bottom:1px solid var(--cream-dark);">
+      <input type="checkbox" onchange="remToggle('${escAttr(r.id)}')" style="margin-top:3px; width:16px; height:16px; accent-color:var(--olive); cursor:pointer;"/>
+      <div style="flex:1; font-size:13px; color:var(--ink);">${escHtml(r.text)} ${r.repeat === 'monthly' ? '<span style="font-size:11px; color:var(--ink-light);">↻ monthly</span>' : ''}</div>
+      <div style="white-space:nowrap;">${tag}</div>
+      <button class="btn btn-ghost btn-sm" title="Delete" onclick="remDelete('${escAttr(r.id)}')" style="padding:0 6px;">✕</button>
+    </div>`;
+  };
+  const doneRow = r => `<div style="display:flex; align-items:center; gap:10px; padding:5px 0; font-size:12px; color:var(--ink-light);">
+      <input type="checkbox" checked onchange="remToggle('${escAttr(r.id)}')" style="width:15px; height:15px; accent-color:var(--olive); cursor:pointer;"/>
+      <div style="flex:1; text-decoration:line-through;">${escHtml(r.text)}</div>
+      <div>${r.doneDate ? fmt(r.doneDate) : ''}</div>
+      <button class="btn btn-ghost btn-sm" title="Delete" onclick="remDelete('${escAttr(r.id)}')" style="padding:0 6px;">✕</button>
+    </div>`;
+  return `<div class="card" style="margin-top:16px; border-color:var(--orange); border-width:1.5px;">
+    <div class="card-title">📌 Reminders ${dueCount ? `<span style="font-size:12px; font-weight:600; color:var(--orange); margin-left:6px;">${dueCount} due soon</span>` : ''}</div>
+    ${open.length ? open.map(row).join('') : '<div style="font-size:13px; color:var(--ink-light); padding:6px 0;">Nothing to do right now.</div>'}
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:12px;">
+      <input type="text" id="rem-new-text" class="form-input" placeholder="Add a reminder…" style="flex:1; min-width:220px;" onkeydown="if(event.key==='Enter') remAdd()"/>
+      <input type="date" id="rem-new-due" class="form-input" style="width:150px;"/>
+      <label style="font-size:12px; color:var(--ink-mid); display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="rem-new-monthly"/> monthly</label>
+      <button class="btn btn-primary btn-sm" onclick="remAdd()">Add</button>
+    </div>
+    ${done.length ? `<details style="margin-top:10px;"><summary style="font-size:12px; color:var(--ink-light); cursor:pointer;">Completed (${done.length})</summary>${done.map(doneRow).join('')}</details>` : ''}
+  </div>`;
+}
+
+function remAdd() {
+  const text = (document.getElementById('rem-new-text')?.value || '').trim();
+  if (!text) { showToast('Type the reminder first', 'warning'); return; }
+  const due = document.getElementById('rem-new-due')?.value || '';
+  const monthly = !!document.getElementById('rem-new-monthly')?.checked;
+  if (monthly && !due) { showToast('A monthly reminder needs a date', 'warning'); return; }
+  const list = _remList();
+  list.push({ id: 'r' + Date.now() + Math.floor(Math.random() * 1000), text, due, done: false, repeat: monthly ? 'monthly' : '' });
+  _remSave(list);
+}
+
+function remToggle(id) {
+  const list = _remList();
+  let r = list.find(x => x.id === id);
+  if (!r && String(id).startsWith('auto:')) {
+    const a = _remAuto().find(x => x.id === id);
+    if (!a) return;
+    r = { id, done: a.done, doneDate: a.doneDate, repeat: '' };
+    list.push(r);
+  }
+  if (!r) return;
+  r.done = !r.done;
+  r.doneDate = r.done ? _todayLocal() : '';
+  // A monthly reminder that is ticked off schedules its next one
+  if (r.done && r.repeat === 'monthly' && r.due) {
+    list.push({ id: 'r' + Date.now() + Math.floor(Math.random() * 1000), text: r.text, due: _remNextMonth(r.due), done: false, repeat: 'monthly' });
+  }
+  _remSave(list);
+}
+
+function remDelete(id) {
+  if (String(id).startsWith('auto:')) {          // generated item: remember that it was dismissed
+    const list = _remList().filter(x => x.id !== id);
+    list.push({ id, dismissed: true });
+    _remSave(list);
+    return;
+  }
+  _remSave(_remList().filter(x => x.id !== id));
 }
 
 // ── DASHBOARD ────────────────────────────────────────────────
@@ -2137,6 +2504,8 @@ async function renderDashboard() {
         <div class="stat-sublabel">All students</div>
       </div>
     </div>
+
+    ${remindersCardHtml()}
 
     <div class="card" style="margin-top:16px;">
       <div class="card-title">Parent Portal Check-In — Days Since Last Visit</div>
@@ -6508,6 +6877,8 @@ const SupabaseSync = {
         activeStudentMessage: sr.active_student_message,
         interestConfirmationMessage: sr.interest_confirmation_message,
         reconfirmSession:     sr.reconfirm_session || '',
+        capacityPlan:         sr.capacity_plan || null,
+        reminders:            sr.reminders || [],
         inactivityMinutes:    sr.inactivity_minutes ?? 45,
       };
 
@@ -6706,6 +7077,8 @@ const SupabaseSync = {
       active_student_message: obj.activeStudentMessage ?? null,
       interest_confirmation_message: obj.interestConfirmationMessage ?? null,
       reconfirm_session:      obj.reconfirmSession || null,
+      capacity_plan:          obj.capacityPlan ?? null,
+      reminders:              obj.reminders ?? null,
       inactivity_minutes:     obj.inactivityMinutes    ?? 45,
     }], { onConflict: 'id' });
     if (error) console.warn('upsertSettings:', error.message);
@@ -9676,6 +10049,7 @@ function renderIntakeInProcess(student, openSess) {
           <div style="font-size:12px; color:var(--orange-dark); margin-top:6px;">
             Once we receive your payment, you'll receive a confirmation email.
           </div>
+          ${_depositNoteHtml()}
         </div>
       ` : ''}
       <div style="background:var(--cream-mid); border-radius:var(--radius-md); padding:14px 18px; font-size:13px; color:var(--ink-mid); margin-bottom:24px;">
@@ -9850,8 +10224,58 @@ function renderIntakeBioForm(student, isInterest) {
         <label class="form-label">Alt. contact phone</label>
         <input type="tel" class="form-input" id="ib-altPhone" value="${escHtml(formatPhone(s.altContactPhone||''))}"/>
       </div>
+      ${(s.status === 'Invited' || s.status === 'In-Process') ? _enrollVolunteerHtml(s) : ''}
     `;
   }
+}
+
+// Enrollment form (Invited / In-Process families): volunteering question, prefilled from the saved answer.
+// Ids use the ev- prefix. Saved by intakeSaveBio; the server cleans and stores it.
+function _enrollVolunteerHtml(s) {
+  const v = s.volunteering || {};
+  const yes = v.willing === true, no = v.willing === false;
+  const roles = Array.isArray(v.roles) ? v.roles : [];
+  const a = v.aide || {};
+  const radio = (id, name, val, on, label) => `<label style="display:block; cursor:pointer;"><input type="radio" name="${name}" id="${id}" value="${val}" ${on ? 'checked' : ''} onchange="onEnrollVolChange()"/> ${label}</label>`;
+  return `
+    <div style="font-size:12px; font-weight:700; color:var(--olive); text-transform:uppercase; letter-spacing:0.06em; margin:20px 0 10px;">Volunteering</div>
+    <div class="form-group">
+      <label class="form-label">Would you be willing to volunteer if your child is enrolled? <span style="color:var(--danger);">*</span></label>
+      <div style="font-size:13px; color:var(--ink-mid); line-height:1.5; margin:2px 0 4px;">HKN runs entirely on parent volunteers. Families who volunteer help us serve more students each year, and <strong>when space is limited, we give priority to families who volunteer.</strong> Please confirm your answer is still right, since time has passed.</div>
+      <div style="display:flex; gap:20px; margin:6px 0 8px; font-size:14px;">
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="radio" name="ev-vol" id="ev-vol-yes" value="yes" ${yes ? 'checked' : ''} onchange="onEnrollVolChange()"/> Yes</label>
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="radio" name="ev-vol" id="ev-vol-no" value="no" ${no ? 'checked' : ''} onchange="onEnrollVolChange()"/> No</label>
+      </div>
+      <div id="ev-vol-roles" style="display:${yes ? 'block' : 'none'}; margin:0 0 8px 2px; font-size:14px; line-height:2;">
+        <div style="font-size:12px; color:var(--ink-light);">Select any that apply:</div>
+        <label style="display:block; cursor:pointer;"><input type="checkbox" id="ev-vol-aide" ${roles.includes('aide') ? 'checked' : ''} onchange="onEnrollVolChange()"/> I'd like to be a teaching assistant for the full year</label>
+        <label style="display:block; cursor:pointer;"><input type="checkbox" id="ev-vol-greeting" ${roles.includes('greeting') ? 'checked' : ''}/> Greeting students as they arrive and leave</label>
+        <label style="display:block; cursor:pointer;"><input type="checkbox" id="ev-vol-events" ${roles.includes('events') ? 'checked' : ''}/> Helping with special events (Diwali, annual celebration, etc.)</label>
+      </div>
+      <div id="ev-aide-box" style="display:${yes && roles.includes('aide') ? 'block' : 'none'}; background:var(--cream-mid); border-radius:var(--radius-md); padding:14px 16px; margin:0 0 8px; font-size:13px; color:var(--ink-mid); line-height:1.55;">
+        <div style="font-weight:700; color:var(--ink); margin-bottom:4px;">Help in the classroom, and learn to teach</div>
+        Many of our teachers began as parent assistants. As a teaching assistant you work beside an experienced teacher for the whole year (Fall, Winter and Spring), see how a class is planned and run, and take on more as you grow. We place assistants in a different classroom from their own child, at a time within 30 minutes of the child's class.
+        <div style="font-size:13px; font-weight:600; color:var(--ink); margin:10px 0 2px;">Which works for you? <span style="color:var(--danger);">*</span></div>
+        ${radio('ev-aide-earlier', 'ev-aide-timing', 'earlier', a.timing === 'earlier', 'Up to 30 minutes <strong>earlier</strong> than my child\'s class')}
+        ${radio('ev-aide-later', 'ev-aide-timing', 'later', a.timing === 'later', 'Up to 30 minutes <strong>later</strong> than my child\'s class')}
+        ${radio('ev-aide-either', 'ev-aide-timing', 'either', a.timing === 'either', '<strong>Either</strong> works for me')}
+        <div style="font-size:12px; color:var(--ink-light); margin:8px 0 3px;">Optional: tell us what draws you to this.</div>
+        <textarea class="form-textarea" id="ev-aide-note" rows="2" maxlength="500">${escHtml(a.note || '')}</textarea>
+        <div style="font-size:12px; color:var(--ink-light); margin-top:6px;">If your availability has changed, simply leave the teaching assistant box unticked. You can still help in another way.</div>
+      </div>
+    </div>`;
+}
+
+// Enrollment form: show roles for "Yes", the teaching-assistant box when that role is ticked
+function onEnrollVolChange() {
+  const yes = !!document.getElementById('ev-vol-yes')?.checked;
+  const box = document.getElementById('ev-vol-roles');
+  if (box) box.style.display = yes ? 'block' : 'none';
+  if (!yes) ['aide','greeting','events'].forEach(r => { const cb = document.getElementById('ev-vol-' + r); if (cb) cb.checked = false; });
+  const aide = yes && !!document.getElementById('ev-vol-aide')?.checked;
+  const ab = document.getElementById('ev-aide-box');
+  if (ab) ab.style.display = aide ? 'block' : 'none';
+  if (!aide) document.querySelectorAll('input[name="ev-aide-timing"]').forEach(r => { r.checked = false; });
 }
 
 // Interest form: show the volunteer-role checkboxes only for "Yes"; clear them on "No"
@@ -9928,6 +10352,28 @@ async function intakeSaveBio() {
     }
   }
 
+  // ── Volunteering on the enrollment form (only present for Invited / In-Process families) ──
+  const _evPresent = !!document.getElementById('ev-vol-yes');
+  if (_evPresent) {
+    const evYes = document.getElementById('ev-vol-yes').checked;
+    const evNo  = document.getElementById('ev-vol-no').checked;
+    if (!evYes && !evNo) {
+      showToast('Please tell us whether you\'d be willing to volunteer', 'error');
+      document.getElementById('ev-vol-yes')?.focus();
+      return;
+    }
+    if (evYes && !['aide','greeting','events'].some(r => document.getElementById('ev-vol-' + r)?.checked)) {
+      showToast('Please select at least one way you\'d be willing to help', 'error');
+      document.getElementById('ev-vol-aide')?.focus();
+      return;
+    }
+    if (evYes && document.getElementById('ev-vol-aide')?.checked && !document.querySelector('input[name="ev-aide-timing"]:checked')) {
+      showToast('Please choose which class timing works for you as a teaching assistant', 'error');
+      document.getElementById('ev-aide-earlier')?.focus();
+      return;
+    }
+  }
+
   let updated;
 
   if (isReturning) {
@@ -9942,6 +10388,17 @@ async function intakeSaveBio() {
       altContactEmail:     document.getElementById('ib-altEmail')?.value || s.altContactEmail || '',
       altContactPhone:     document.getElementById('ib-altPhone')?.value || s.altContactPhone || '',
     };
+    if (_evPresent) {
+      const evYes   = !!document.getElementById('ev-vol-yes').checked;
+      const evRoles = evYes ? ['aide','greeting','events'].filter(r => document.getElementById('ev-vol-' + r)?.checked) : [];
+      updated.volunteering = { willing: evYes, roles: evRoles };
+      if (evRoles.includes('aide')) {
+        updated.volunteering.aide = {
+          timing: document.querySelector('input[name="ev-aide-timing"]:checked')?.value || '',
+          note:   (document.getElementById('ev-aide-note')?.value || '').trim().slice(0, 500),
+        };
+      }
+    }
 
     // Invited student completing intake form — promote to In-Process if assessment is done
     if (s.status === 'Invited') {
@@ -10112,6 +10569,11 @@ function renderIntakeInterestUpdated(student) {
   `;
 }
 
+// Deposit disclosure, shown inside each payment box
+function _depositNoteHtml() {
+  return `<div style="font-size:14px; color:var(--ink); line-height:1.55; margin-top:14px; padding:12px 14px; background:var(--warning-light); border-left:4px solid var(--orange); border-radius:var(--radius-md);"><div style="font-weight:700; color:var(--orange-dark); margin-bottom:3px;">Please note: your enrollment fee is treated as a deposit.</div>Final placement depends on factors such as teacher availability, class size, age composition, and aide availability. In rare cases, this may require us to adjust or cancel a placement even after enrollment is complete, in which case your fee will be fully refunded.</div>`;
+}
+
 function renderIntakeConfirmation(student) {
   const activeSess = intakeState.openSess || SessionEngine.getActiveSession();
   const isInterest = intakeState.isInterest;
@@ -10170,6 +10632,7 @@ function renderIntakeConfirmation(student) {
           <div style="font-size:12px; color:var(--orange-dark); margin-top:6px;">
             Once we receive your payment, you'll receive a confirmation email completing the enrollment.
           </div>
+          ${_depositNoteHtml()}
         </div>
       ` : `
         <div style="background:var(--olive-pale); border-radius:var(--radius-md); padding:14px 18px; font-size:13px; color:var(--ink-mid);">
